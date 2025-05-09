@@ -1,0 +1,51 @@
+.pio
+.vscode/
+.idea/
+*.db
+*.sqlite
+*.sqlite3
+
+# Build artifacts
+build/
+firmware.*
+*.elf
+*.bin
+*.hex
+*.map
+*.eep
+*.srec
+*.sym
+*.ld
+*.ppu
+*.o
+*.lst
+*.bak
+*.stackdump
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Secrets and local configuration (if any, add your specific files)
+# 예를 들어, 실제 WiFi SSID/비밀번호나 API 키를 담은 파일이 있다면 여기에 추가합니다.
+# include/secrets.h
+# src/secrets.cpp
+
+# C/C++ Autocomplete/IntelliSense databases (specific to some editors)
+compile_commands.json
+c_cpp_properties.json
+
+# Libraries installed by PlatformIO (usually in .pio/libdeps)
+# .pio/libdeps/ 는 이미 .pio/ 로 커버됩니다.
+
+# Log files
+*.log
+
+# Python virtual environment (if used locally for scripts, etc.)
+.venv/
+venv/
+ENV/
+env/
+
+data/

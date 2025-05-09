@@ -1,0 +1,34 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["iot:Connect"],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["iot:Publish", "iot:Receive"],
+      "Resource": [
+        "arn:aws:iot:ap-northeast-2:*:topic/$aws/certificates/create/*",
+        "arn:aws:iot:ap-northeast-2:*:topic/$aws/provisioning-templates/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": "iot:Subscribe",
+      "Resource": [
+        "arn:aws:iot:ap-northeast-2:*:topicfilter/$aws/certificates/create/*",
+        "arn:aws:iot:ap-northeast-2:*:topicfilter/$aws/provisioning-templates/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "iot:CreateKeysAndCertificate",
+        "iot:CreateCertificateFromCsr"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

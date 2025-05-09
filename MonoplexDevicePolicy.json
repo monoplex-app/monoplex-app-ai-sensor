@@ -1,0 +1,39 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "iot:Connect",
+      "Resource": "arn:aws:iot:ap-northeast-2:961341525916:client/${iot:ClientId}",
+      "Condition": {
+        "Bool": {
+          "iot:Connection.Thing.IsAttached": "true"
+        }
+      }
+    },
+    {
+      "Effect": "Allow",
+      "Action": "iot:Publish",
+      "Resource": [
+        "arn:aws:iot:ap-northeast-2:961341525916:topic/devices/${iot:ClientId}/events/*",
+        "arn:aws:iot:ap-northeast-2:961341525916:topic/devices/${iot:ClientId}/sensors/*",
+        "arn:aws:iot:ap-northeast-2:961341525916:topic/devices/${iot:ClientId}/status/*",
+        "arn:aws:iot:ap-northeast-2:961341525916:topic/devices/${iot:ClientId}/images/uploaded"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": "iot:Subscribe",
+      "Resource": [
+        "arn:aws:iot:ap-northeast-2:961341525916:topicfilter/devices/${iot:ClientId}/commands/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": "iot:Receive",
+      "Resource": [
+        "arn:aws:iot:ap-northeast-2:961341525916:topic/devices/${iot:ClientId}/commands/*"
+      ]
+    }
+  ]
+}
