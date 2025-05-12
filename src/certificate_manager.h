@@ -62,6 +62,14 @@ private:
     String deviceCert;
     String deviceKey;
     bool requestProvisioning(const String &certificateOwnershipToken);
+
+    // 임시 저장용 멤버 변수
+    String tempDeviceCert;
+    String tempDeviceKey;
+    String tempCertificateId;
+    String tempCertificateOwnershipToken;
+
+    String m_provisioningPayload;
 };
 
 // 전역 인스턴스

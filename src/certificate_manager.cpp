@@ -1,11 +1,15 @@
 #include "certificate_manager.h"
 #include "device_identity.h"
-#include "aws_mqtt_handler.h"
+
+// PubSubClient 및 WiFiClientSecure 헤더 추가
+#include <WiFiClientSecure.h>
+#include <PubSubClient.h>
+#include "config.h" // AWS_IOT_ENDPOINT, MQTT_BUFFER_SIZE 등 필요
 
 // 전역 인스턴스 생성
 CertificateManager certManager;
 
-CertificateManager::CertificateManager() : rootCACert(""), deviceCert(""), deviceKey(""), claimCert(""), claimKey("")
+CertificateManager::CertificateManager() : rootCACert(""), deviceCert(""), deviceKey(""), claimCert(""), claimKey(""), tempDeviceCert(""), tempDeviceKey(""), tempCertificateId(""), tempCertificateOwnershipToken(""), m_provisioningPayload("")
 {
 }
 
@@ -60,7 +64,7 @@ void CertificateManager::initCertificates()
     }
 
     // // 2. 디바이스 인증서 확인
-    // if (loadDeviceCert())
+    // if (loadDeviceCert()) // 디바이스 인증서가 이미 있으면 MQTT 과정 불필요
     // {
     //     Serial.println(F("[CERT] 디바이스 인증서 로드 성공"));
     //     return;
@@ -83,20 +87,6 @@ void CertificateManager::initCertificates()
     }
 
     Serial.println(F("[CERT] 인증서 요청 성공"));
-
-    // // 최대 3회 재시도
-    // for (int attempt = 0; attempt < 3; attempt++)
-    // {
-    //     Serial.printf_P(PSTR("[CERT] 인증서 요청 시도 %d/3\n"), attempt + 1);
-    //     if (requestNewCertificate())
-    //     {
-    //         Serial.println(F("[CERT] 인증서 요청 성공"));
-    //         return;
-    //     }
-    //     delay(1000); // 재시도 전 잠시 대기
-    // }
-
-    // Serial.println(F("[CERT] 인증서 요청 최대 시도 횟수 초과"));
 }
 
 bool CertificateManager::loadRootCA()
@@ -147,7 +137,7 @@ bool CertificateManager::loadDeviceCert()
         Serial.println(F("[LFS_ERROR] 영구 인증서 파일 읽기 실패."));
         return false;
     }
-
+    Serial.println(F("[LFS] 영구 인증서 로드 성공."));
     return true;
 }
 
@@ -177,7 +167,7 @@ bool CertificateManager::loadClaimCert()
         Serial.println(F("[LFS_ERROR] 클레임 인증서 파일 읽기 실패."));
         return false;
     }
-
+    Serial.println(F("[LFS] 클레임 인증서 로드 성공."));
     return true;
 }
 
@@ -189,199 +179,264 @@ bool CertificateManager::requestNewCertificate()
     // 올바른 요청 페이로드 사용
     const char *request = "{}";
 
-    // 보안 클라이언트 설정
     std::unique_ptr<WiFiClientSecure> secureClient(new WiFiClientSecure());
+    PubSubClient mqttClient(*secureClient);
+
     secureClient->setCACert(rootCACert.c_str());
     secureClient->setCertificate(claimCert.c_str());
     secureClient->setPrivateKey(claimKey.c_str());
 
-    // 인증서 응답 변수
-    bool certificateReceived = false;
-    String deviceCert = "";
-    String deviceKey = "";
-    String certificateId = "";
-    String certificateOwnershipToken = "";
+    mqttClient.setServer(aws_endpoint, 8883);
+    mqttClient.setBufferSize(MQTT_BUFFER_SIZE);
+    mqttClient.setKeepAlive(60);
 
-    // MQTT 연결
     Serial.println(F("[MQTT] 연결 시도"));
-    if (!mqttHandler.connect())
+    const char *clientId = DeviceIdentity::getDeviceId();
+    if (!mqttClient.connect(clientId, NULL, NULL, NULL, 0, false, NULL, true))
     {
-        Serial.println(F("[MQTT] 연결 실패"));
+        Serial.print(F("[MQTT] 연결 실패, 상태: "));
+        Serial.println(mqttClient.state());
         return false;
     }
 
     Serial.println(F("[MQTT] 연결 성공"));
+    for (int i = 0; i < 3; i++)
+    {
+        mqttClient.loop();
+        delay(10);
+    }
 
-    // 응답 토픽 구독
-    const char *cert_accepted = CERTIFICATE_CREATE_ACCEPTED_TOPIC;
-    const char *cert_rejected = CERTIFICATE_CREATE_REJECTED_TOPIC;
-    const char *prov_accepted = PROVISIONING_ACCEPTED_TOPIC;
-    const char *prov_rejected = PROVISIONING_REJECTED_TOPIC;
-    mqttHandler.subscribe(cert_accepted);
-    mqttHandler.subscribe(cert_rejected);
-    mqttHandler.subscribe(prov_accepted);
-    mqttHandler.subscribe(prov_rejected);
+    const char *cert_accepted_topic_str = CERTIFICATE_CREATE_ACCEPTED_TOPIC;
+    const char *cert_rejected_topic_str = CERTIFICATE_CREATE_REJECTED_TOPIC;
+    const char *prov_accepted_topic_str = PROVISIONING_ACCEPTED_TOPIC;
+    const char *prov_rejected_topic_str = PROVISIONING_REJECTED_TOPIC;
 
-    // 콜백 설정
-    mqttHandler.setCallback([&](char *topic, byte *payload, unsigned int length)
-                            {
+    mqttClient.subscribe(cert_accepted_topic_str);
+    mqttClient.subscribe(cert_rejected_topic_str);
+    mqttClient.subscribe(prov_accepted_topic_str);
+    mqttClient.subscribe(prov_rejected_topic_str);
+
+    // 람다 함수를 변수에 저장
+    auto callbackLambda = [this, &mqttClient, cert_accepted_topic_str, cert_rejected_topic_str, prov_accepted_topic_str, prov_rejected_topic_str](char *topic, byte *payload, unsigned int length)
+    {
         Serial.printf_P(PSTR("[MQTT] 메시지 수신: %s (길이: %d)\n"), topic, length);
-        
-        // 페이로드를 null 종료 문자열로 변환
-        std::unique_ptr<char[]> message(new char[length + 1]);
-        memcpy(message.get(), payload, length);
-        message[length] = '\0';
-        
-        // 응답 토픽 확인
-        if (strcmp(topic, cert_accepted) == 0) {
-            Serial.println(F("[MQTT] 인증서 생성 요청 승인됨 (CERTIFICATE_CREATE_ACCEPTED_TOPIC)"));
-            
-            // 구독 취소 (인증서 생성 관련 토픽만)
-            mqttHandler.unsubscribe(cert_accepted);
-            mqttHandler.unsubscribe(cert_rejected);
 
-            // 수락된 인증서 처리
-            processAcceptedCertificate(message.get(), deviceCert, deviceKey, 
-                                    certificateId, certificateOwnershipToken
-                                    );
-        } else if (strcmp(topic, cert_rejected) == 0) {
+        std::unique_ptr<char[]> message_ptr(new char[length + 1]);
+        memcpy(message_ptr.get(), payload, length);
+        message_ptr[length] = '\0';
+        const char *message = message_ptr.get();
+
+        if (strcmp(topic, cert_accepted_topic_str) == 0)
+        {
+            Serial.println(F("[MQTT] 인증서 생성 요청 승인됨 (CERTIFICATE_CREATE_ACCEPTED_TOPIC)"));
+            mqttClient.unsubscribe(cert_accepted_topic_str);
+            mqttClient.unsubscribe(cert_rejected_topic_str);
+
+            String localCert, localKey, localId, localToken;
+            // processAcceptedCertificate 호출하여 로컬 변수에 값 저장
+            this->processAcceptedCertificate(message, localCert, localKey, localId, localToken);
+
+            // 로컬 변수 값을 클래스 멤버(temp) 변수에 저장
+            this->tempDeviceCert = localCert;
+            this->tempDeviceKey = localKey;
+            this->tempCertificateId = localId; // 필요시 사용
+            this->tempCertificateOwnershipToken = localToken;
+
+            if (!this->tempCertificateOwnershipToken.isEmpty())
+            {
+                // requestProvisioning은 페이로드만 생성하여 this->m_provisioningPayload에 저장
+                if (this->requestProvisioning(this->tempCertificateOwnershipToken))
+                {
+                    // 람다에서 직접 MQTT 발행
+                    if (!this->m_provisioningPayload.isEmpty())
+                    {
+                        bool provisionPublishSuccess = mqttClient.publish(PROVISIONING_REQUEST_TOPIC, reinterpret_cast<const uint8_t *>(this->m_provisioningPayload.c_str()), this->m_provisioningPayload.length());
+                        if (provisionPublishSuccess)
+                        {
+                            Serial.println(F("[PROV] 프로비저닝 요청 발행 성공 (콜백 내)"));
+                        }
+                        else
+                        {
+                            Serial.println(F("[PROV] 프로비저닝 요청 발행 실패 (콜백 내)"));
+                        }
+                    }
+                    else
+                    {
+                        Serial.println(F("[PROV_ERROR] 생성된 프로비저닝 페이로드가 비어있습니다."));
+                    }
+                }
+                else
+                {
+                    Serial.println(F("[PROV_ERROR] 프로비저닝 페이로드 생성 실패."));
+                }
+            }
+            else
+            {
+                Serial.println(F("[CERT_ERROR] 인증서 수신 데이터(토큰) 누락."));
+            }
+        }
+        else if (strcmp(topic, cert_rejected_topic_str) == 0)
+        {
             Serial.println(F("[MQTT] 인증서 생성 요청 거부됨 (CERTIFICATE_CREATE_REJECTED_TOPIC)"));
             Serial.print(F("[MQTT] 오류 메시지: "));
-            Serial.println(message.get());
+            Serial.println(message);
         }
-        else if (strcmp(topic, prov_accepted) == 0) {
+        else if (strcmp(topic, prov_accepted_topic_str) == 0)
+        {
             Serial.println(F("[MQTT] 프로비저닝 요청 승인됨 (PROVISIONING_ACCEPTED_TOPIC)"));
-
-            // 구독 취소 (프로비저닝 관련 토픽만)
-            mqttHandler.unsubscribe(prov_accepted);
-            mqttHandler.unsubscribe(prov_rejected);
-
-            savePermanentCertificate(deviceCert, deviceKey, certificateOwnershipToken);
-        } else if (strcmp(topic, prov_rejected) == 0) {
+            mqttClient.unsubscribe(prov_accepted_topic_str);
+            mqttClient.unsubscribe(prov_rejected_topic_str);
+            // tempDeviceCert 등은 CERTIFICATE_CREATE_ACCEPTED_TOPIC 콜백에서 이미 설정됨
+            savePermanentCertificate(this->tempDeviceCert, this->tempDeviceKey, this->tempCertificateOwnershipToken);
+        }
+        else if (strcmp(topic, prov_rejected_topic_str) == 0)
+        {
             Serial.println(F("[MQTT] 프로비저닝 요청 거부됨 (PROVISIONING_REJECTED_TOPIC)"));
             Serial.print(F("[MQTT] 오류 메시지: "));
-            Serial.println(message.get());
-        }        
-        else {
+            Serial.println(message);
+        }
+        else
+        {
             Serial.printf_P(PSTR("[MQTT] 처리되지 않은 토픽 수신: %s\n"), topic);
         }
-        
-        message.reset(); });
+    };
 
-    delay(200); // 구독 처리 시간 대기
+    // setCallback에 lvalue 람다 전달
+    mqttClient.setCallback(callbackLambda);
 
-    // 요청 전송
+    delay(200);
+
     Serial.printf_P(PSTR("[MQTT] 요청 페이로드: %s\n"), request);
     Serial.printf_P(PSTR("[MQTT] 토픽 '%s'에 발행 시도\n"), CERTIFICATE_CREATE_TOPIC);
 
-    bool success = mqttHandler.publish(CERTIFICATE_CREATE_TOPIC, request);
+    bool success = mqttClient.publish(CERTIFICATE_CREATE_TOPIC, request);
     if (!success)
     {
         Serial.println(F("[MQTT] 인증서 발행 요청 실패"));
+        mqttClient.disconnect();
         return false;
     }
 
     Serial.println(F("[MQTT] 인증서 발행 요청 성공"));
+
+    unsigned long startTime = millis();
+    bool provisioningComplete = false;
+    while (!provisioningComplete && (millis() - startTime < 60000))
+    {
+        mqttClient.loop();
+        if (!deviceCert.isEmpty() && !deviceKey.isEmpty())
+        {
+            provisioningComplete = true;
+        }
+        delay(100);
+    }
+
+    mqttClient.disconnect();
+
+    if (!provisioningComplete)
+    {
+        Serial.println(F("[CERT] 인증서 수신 및 프로비저닝 타임아웃 또는 실패"));
+        return false;
+    }
+
+    Serial.println(F("[CERT] 인증서 수신 및 프로비저닝 완료"));
+    return true;
 }
 
+// 헤더파일과 시그니처 일치시키고, 참조 인자를 통해 결과 반환
 void CertificateManager::processAcceptedCertificate(
     const char *message,
-    String &deviceCert,
-    String &deviceKey,
-    String &certificateId,
-    String &certificateOwnershipToken)
+    String &outDeviceCert,               // 출력용 참조 인자
+    String &outDeviceKey,                // 출력용 참조 인자
+    String &outCertificateId,            // 출력용 참조 인자
+    String &outCertificateOwnershipToken // 출력용 참조 인자
+)
 {
-    Serial.println(F("[CERT] 인증서 생성 요청 승인됨"));
+    Serial.println(F("[CERT] 인증서 생성 요청 승인됨 (processAcceptedCertificate)"));
 
-    // JSON 파싱
     StaticJsonDocument<2048> doc;
     DeserializationError error = deserializeJson(doc, message);
 
     if (error)
     {
         Serial.printf_P(PSTR("[CERT] JSON 파싱 실패: %s\n"), error.c_str());
+        // 출력 인자들을 비워두거나 에러 상태를 나타내는 값으로 설정할 수 있습니다.
+        outDeviceCert = "";
+        outDeviceKey = "";
+        outCertificateId = "";
+        outCertificateOwnershipToken = "";
         return;
     }
 
-    // 필요한 데이터 추출
-    deviceCert = doc["certificatePem"].as<String>();
-    deviceKey = doc["privateKey"].as<String>();
-    certificateId = doc["certificateId"].as<String>();
-    certificateOwnershipToken = doc["certificateOwnershipToken"].as<String>();
+    // 파싱된 값을 출력 인자에 할당
+    outDeviceCert = doc["certificatePem"].as<String>();
+    outDeviceKey = doc["privateKey"].as<String>();
+    outCertificateId = doc["certificateId"].as<String>();
+    outCertificateOwnershipToken = doc["certificateOwnershipToken"].as<String>();
 
-    Serial.printf_P(PSTR("[CERT] 인증서 및 개인키 수신 성공: %s, %s\n"), deviceCert.c_str(), deviceKey.c_str());
-    Serial.printf_P(PSTR("[CERT] 인증서 ID: %s\n"), certificateId.c_str());
-    Serial.printf_P(PSTR("[CERT] 토큰(처음 20자): %s\n"), certificateOwnershipToken.substring(0, 20).c_str());
+    Serial.printf_P(PSTR("[CERT] 파싱된 인증서: %s...\n"), outDeviceCert.substring(0, 20).c_str());
+    Serial.printf_P(PSTR("[CERT] 파싱된 개인키: %s...\n"), outDeviceKey.substring(0, 20).c_str());
+    Serial.printf_P(PSTR("[CERT] 파싱된 ID: %s\n"), outCertificateId.c_str());
+    Serial.printf_P(PSTR("[CERT] 파싱된 토큰: %s...\n"), outCertificateOwnershipToken.substring(0, 20).c_str());
 
-    if (deviceCert.length() > 0 && deviceKey.length() > 0 && certificateId.length() > 0 && certificateOwnershipToken.length() > 0)
+    if (outDeviceCert.isEmpty() || outDeviceKey.isEmpty() || outCertificateId.isEmpty() || outCertificateOwnershipToken.isEmpty())
     {
-        Serial.println(F("[CERT] 인증서, 개인키, 토큰 수신 성공"));
-
-        // 프로비저닝 요청 시작
-        requestProvisioning(certificateOwnershipToken);
+        Serial.println(F("[CERT] 인증서 데이터 일부 누락됨"));
     }
     else
     {
-        Serial.println(F("[CERT] 인증서 데이터 누락"));
+        Serial.println(F("[CERT] 인증서, 개인키, ID, 토큰 파싱 성공"));
     }
 }
 
-// 프로비저닝 요청 메서드 추가
-bool CertificateManager::requestProvisioning(const String &certificateOwnershipToken)
+// 헤더파일과 시그니처 일치. 페이로드를 m_provisioningPayload에 저장하고 성공 여부 반환.
+bool CertificateManager::requestProvisioning(
+    const String &certificateOwnershipTokenToUse)
 {
-    Serial.println(F("[PROV] 프로비저닝 요청 시작"));
+    Serial.println(F("[PROV] 프로비저닝 페이로드 생성 시작 (requestProvisioning)"));
+    m_provisioningPayload = ""; // 이전 페이로드 클리어
 
-    // 디버그 메시지 추가
     Serial.print(F("[PROV] 템플릿 이름: "));
     Serial.println(FPSTR(PROVISIONING_TEMPLATE_NAME));
 
-    // 간소화된 페이로드 사용
     StaticJsonDocument<512> jsonDoc;
 
-    // 토큰 검증 - 길이 확인
-    if (certificateOwnershipToken.length() < 20)
+    if (certificateOwnershipTokenToUse.length() < 20)
     {
-        Serial.println(F("[PROV] 토큰이 너무 짧거나 비어 있음"));
+        Serial.println(F("[PROV_ERROR] 토큰이 너무 짧거나 비어 있음"));
         return false;
     }
 
-    // 페이로드 구성
-    jsonDoc["certificateOwnershipToken"] = certificateOwnershipToken;
-    // 템플릿 파라미터에 일치하는 키 사용
+    jsonDoc["certificateOwnershipToken"] = certificateOwnershipTokenToUse;
     JsonObject parameters = jsonDoc.createNestedObject("parameters");
     parameters["SerialNumber"] = DeviceIdentity::getDeviceId();
 
-    // 충분히 큰 버퍼 사용 (512바이트로 충분)
-    char provisionPayload[512] = {0};
-    size_t len = serializeJson(jsonDoc, provisionPayload, sizeof(provisionPayload));
+    char provisionPayloadBuffer[4096] = {0};
+    size_t len = serializeJson(jsonDoc, provisionPayloadBuffer, sizeof(provisionPayloadBuffer));
 
-    // 길이 확인 디버깅
-    Serial.printf("[PROV] JSON 길이: %d 바이트\n", len);
-
-    // 토큰 디버깅
-    Serial.print(F("[PROV] 토큰 유효성: "));
-    Serial.println(certificateOwnershipToken.indexOf("eyJ") == 0 ? "유효함" : "의심됨");
-    Serial.printf_P(PSTR("[PROV] 토큰 길이: %d 바이트\n"), certificateOwnershipToken.length());
-
-    // 발행시 길이 명시적으로 전달
-    if (!mqttHandler.publish(PROVISIONING_REQUEST_TOPIC, provisionPayload, len))
+    if (len == 0 || len >= sizeof(provisionPayloadBuffer))
     {
-        Serial.println(F("[PROV] 프로비저닝 요청 발행 실패"));
+        Serial.println(F("[PROV_ERROR] JSON 직렬화 실패 또는 버퍼 오버플로우"));
         return false;
     }
 
-    Serial.println(F("[PROV] 프로비저닝 요청 발행 성공"));
+    m_provisioningPayload = String(provisionPayloadBuffer); // 생성된 페이로드를 멤버 변수에 저장
+
+    Serial.printf("[PROV] 생성된 JSON 길이: %u 바이트\n", len);
+    Serial.print(F("[PROV] 토큰 유효성: "));
+    Serial.println(certificateOwnershipTokenToUse.indexOf("eyJ") == 0 ? "유효함" : "의심됨");
+    Serial.printf_P(PSTR("[PROV] 토큰 길이: %u 바이트\n"), certificateOwnershipTokenToUse.length());
+    Serial.println(F("[PROV] 프로비저닝 페이로드 생성 성공"));
     return true;
 }
 
 void CertificateManager::savePermanentCertificate(
-    const String &permanentCert,
-    const String &permanentKey,
-    const String &certificateOwnershipToken)
+    const String &permanentCertToSave,
+    const String &permanentKeyToSave,
+    const String &tokenToSave)
 {
     Serial.println(F("[CERT] 영구 인증서 파일 저장 중..."));
 
-    // 기존 파일 삭제
     if (LittleFS.exists(LFS_DEVICE_CRT_PATH))
     {
         LittleFS.remove(LFS_DEVICE_CRT_PATH);
@@ -391,11 +446,10 @@ void CertificateManager::savePermanentCertificate(
         LittleFS.remove(LFS_DEVICE_KEY_PATH);
     }
 
-    // 새 인증서 파일 저장
     File certFile = LittleFS.open(LFS_DEVICE_CRT_PATH, "w");
     if (certFile)
     {
-        certFile.print(permanentCert);
+        certFile.print(permanentCertToSave);
         certFile.close();
         Serial.println(F("[CERT] 영구 인증서 저장 완료"));
     }
@@ -404,11 +458,10 @@ void CertificateManager::savePermanentCertificate(
         Serial.println(F("[CERT] 영구 인증서 파일 생성 실패"));
     }
 
-    // 새 개인키 파일 저장
     File keyFile = LittleFS.open(LFS_DEVICE_KEY_PATH, "w");
     if (keyFile)
     {
-        keyFile.print(permanentKey);
+        keyFile.print(permanentKeyToSave);
         keyFile.close();
         Serial.println(F("[CERT] 영구 개인키 저장 완료"));
     }
@@ -417,17 +470,26 @@ void CertificateManager::savePermanentCertificate(
         Serial.println(F("[CERT] 영구 개인키 파일 생성 실패"));
     }
 
-    // 토큰 저장 (프로비저닝에 사용됨)
     Preferences preferences;
-    if (preferences.begin("cert-state", false))
+    if (preferences.begin("cert-state", false)) // "cert-state" 네임스페이스 사용
     {
-        preferences.putString("cert-token", certificateOwnershipToken.c_str());
+        preferences.putString("cert-token", tokenToSave.c_str()); // 토큰 저장
         preferences.end();
         Serial.println(F("[CERT] 인증서 토큰 저장 완료"));
     }
+    else
+    {
+        Serial.println(F("[PREF_ERROR] Preferences 초기화 실패 (cert-state)"));
+    }
 
-    // 메모리에 인증서 로드
-    deviceCert = permanentCert;
-    deviceKey = permanentKey;
+    // 실제 디바이스 인증서/키 멤버 변수 업데이트
+    deviceCert = permanentCertToSave;
+    deviceKey = permanentKeyToSave;
+
+    // 임시 변수 초기화
+    tempDeviceCert = "";
+    tempDeviceKey = "";
+    tempCertificateId = "";
+    tempCertificateOwnershipToken = "";
     Serial.println(F("[CERT] 새 영구 인증서 메모리에 로드 완료"));
 }

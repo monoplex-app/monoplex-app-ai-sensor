@@ -1,7 +1,6 @@
 #include "wifi_manager.h"
 #include <time.h>
 #include "certificate_manager.h"
-#include "aws_mqtt_handler.h"
 
 // 전역 인스턴스 생성
 WiFiManager wifiManager;
@@ -78,9 +77,6 @@ bool WiFiManager::connect(const char *ssid, const char *password)
         {
             Serial.println(F("[NTP] 시간 가져오기 실패"));
         }
-
-        // MQTT 초기화
-        mqttHandler.init();
 
         // 파일 시스템 초기화 및 인증서 초기화
         certManager.init();
