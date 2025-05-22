@@ -46,7 +46,7 @@ const unsigned long CERT_RETRY_TIMEOUT = 120;           // 2분(초 단위)
 const size_t JSON_BUFFER_SIZE = 384;
 const size_t MQTT_BUFFER_SIZE = 4096;
 const size_t CERT_TOKEN_SIZE = 256;
-const size_t DEVICE_ID_SIZE = 13;     // 12자리 MAC + NULL 종료자
+const size_t DEVICE_ID_SIZE = 17;     // MLX_ + 12자리 MAC + NULL 종료자
 const size_t AWS_CLIENT_ID_SIZE = 20; // "esp32-" + 12자리 MAC + NULL
 
 // FPSTR 매크로 결과를 const char*로 변환하는 헬퍼 함수
