@@ -1,5 +1,7 @@
 #pragma once
 
+#define CAMERA_MODEL_ESP32S3_EYE // 사용 중인 카메라 모델
+
 #include <Arduino.h>
 
 // WiFi 및 BLE 설정
@@ -54,3 +56,16 @@ inline const char *fpstr_to_cstr(const __FlashStringHelper *fpstr)
 {
     return reinterpret_cast<const char *>(fpstr);
 }
+
+// LED 핀 (외주 코드 및 현재 프로젝트 필요에 따라 통합)
+#define LED_BLUE 2 // 현재 프로젝트의 기존 핀과 충돌 여부 확인
+#define LED_RED 20 // 현재 프로젝트의 기존 핀과 충돌 여부 확인
+#define LED_ON 0
+#define LED_OFF 1
+#define LIGHT 19
+#define LIGHT_OFF 0
+#define LIGHT_ON 1
+
+// I2C 핀 (센서용 - 외주 코드 기준)
+#define I2C_SDA_PIN 41
+#define I2C_SCL_PIN 42
