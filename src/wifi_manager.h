@@ -37,11 +37,21 @@ public:
     // IP 주소 얻기
     String getLocalIP() const;
 
+    // Wi-Fi 연결 후 처리 작업이 보류 중인지 확인
+    bool isPendingPostConnectionSetup() const;
+
+    // Wi-Fi 연결 후 처리 작업 수행
+    void handlePostConnectionSetup();
+
 private:
     Preferences preferences;
     unsigned long lastReconnectAttempt;
+    int connectRetryCount;                    // Wi-Fi 연결 재시도 횟수
+    static const int MAX_CONNECT_RETRIES = 3; // 최대 재시도 횟수
+    bool m_pendingPostConnectionSetup;        // Wi-Fi 연결 후처리 작업 대기 플래그
 
     void readSavedSettings(char *ssid, size_t ssidSize, char *pass, size_t passSize);
+    void clearSavedSettings(); // 저장된 WiFi 설정 삭제
 };
 
 // 전역 인스턴스

@@ -63,12 +63,12 @@ void CertificateManager::initCertificates()
         return;
     }
 
-    // // 2. 디바이스 인증서 확인
-    // if (loadDeviceCert()) // 디바이스 인증서가 이미 있으면 MQTT 과정 불필요
-    // {
-    //     Serial.println(F("[CERT] 디바이스 인증서 로드 성공"));
-    //     return;
-    // }
+    // 2. 디바이스 인증서 확인
+    if (loadDeviceCert()) // 디바이스 인증서가 이미 있으면 MQTT 과정 불필요
+    {
+        Serial.println(F("[CERT] 디바이스 인증서 로드 성공"));
+        return;
+    }
 
     // 3. 디바이스 인증서가 없으면 클레임 인증서 로드
     Serial.println(F("[CERT] 클레임 인증서 로드 시도"));

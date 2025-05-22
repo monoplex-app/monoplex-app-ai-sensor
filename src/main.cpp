@@ -48,5 +48,11 @@ void loop()
   // WiFi 관리
   wifiManager.update();
 
+  // Wi-Fi 연결 후 보류된 설정 작업 처리
+  if (wifiManager.isPendingPostConnectionSetup() && wifiManager.isConnected())
+  {
+    wifiManager.handlePostConnectionSetup();
+  }
+
   delay(100);
 }
