@@ -13,6 +13,7 @@
 #include <ArduinoJson.h>  // JSON 라이브러리
 
 #include "camera_handler.h"
+extern void camera_deinit_system();
 #include "esp_heap_caps.h"
 
 // AWS IoT Core 설정
@@ -24,6 +25,20 @@ PubSubClient mqttClient(wifiClientSecure);
 
 Adafruit_VCNL4040 vcnl4040;
 BMI270 imu;
+
+// S3 업로드 관련
+String currentUploadUrl = "";
+String currentS3Host = "";
+const char *s3Url_default = "https://your-s3-bucket.s3.your-region.amazonaws.com/path/to/image.jpg?PresignedURLParams";
+const char *s3Host_default = "your-s3-bucket.s3.your-region.amazonaws.com";
+
+// 조명 제어
+#define LIGHT_PIN 19
+#define LIGHT_ON 1
+#define LIGHT_OFF 0
+#define LIGHT_NIGHT 10.0 // Lux 이하일 때 조명 ON
+
+float ambient = 20.0; // VCNL4040 등에서 주기적으로 업데이트
 
 // MQTT 메시지 수신 콜백 함수 (필요시 확장)
 void mqtt_callback(char *topic, byte *payload, unsigned int length)
@@ -94,7 +109,7 @@ void publish_sensor_data()
 
   // VCNL4040 센서 데이터
   uint16_t proximity = vcnl4040.getProximity();
-  float ambient = vcnl4040.getLux();
+  ambient = vcnl4040.getLux();
   jsonDoc["proximity"] = proximity;
   jsonDoc["ambientLight"] = ambient;
 
@@ -134,6 +149,27 @@ void publish_sensor_data()
 }
 
 bool cameraOk = false;
+bool needCameraReinit = false; // 카메라 재초기화 필요 플래그
+
+void reinit_camera_with_ble_safety()
+{
+  BLEDevice::stopAdvertising();
+  delay(500);
+  Serial.printf("[MEM] Free heap before camera: %d bytes\n", heap_caps_get_free_size(MALLOC_CAP_8BIT));
+  camera_deinit_system();
+  delay(500);
+  cameraOk = camera_init_system();
+  if (cameraOk)
+  {
+    Serial.println(F("[LOOP] 카메라 시스템 재초기화 성공."));
+    digitalWrite(LED_RED, LED_OFF);
+  }
+  else
+  {
+    Serial.println(F("[LOOP] 카메라 시스템 재초기화 실패!"));
+  }
+  BLEDevice::startAdvertising();
+}
 
 void setup()
 {
@@ -234,20 +270,29 @@ void setup()
 
   Serial.println(F("[SETUP] 모든 초기화 단계 완료."));
 
-  Serial.printf("[MEM] Free heap: %d bytes\n", heap_caps_get_free_size(MALLOC_CAP_8BIT));
+  Serial.printf("[MEM] Free DRAM heap: %d bytes\n", heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 }
 
 void loop()
 {
   wifiManager.update();
+
+  // BLE로 WiFi 정보가 바뀌었거나, WiFi/MQTT 재연결 성공 시 카메라 재초기화
+  if (needCameraReinit && wifiManager.isConnected() && mqttClient.connected())
+  {
+    reinit_camera_with_ble_safety();
+    needCameraReinit = false;
+  }
+
   if (wifiManager.isPendingPostConnectionSetup() && wifiManager.isConnected())
   {
     safeMqttDisconnect();
     wifiManager.handlePostConnectionSetup();
     if (wifiManager.isConnected())
     {
-      Serial.println(F("[MAIN] WiFi 연결 완료, BLE 프로비저닝 중지"));
-      bleProvisioning.stop();
+      Serial.println(F("[MAIN] WiFi 연결 완료"));
+      // Serial.println(F("[MAIN] WiFi 연결 완료, BLE 프로비저닝 중지"));
+      // bleProvisioning.stop();
       delay(1000);
     }
     setup_mqtt();
@@ -307,4 +352,12 @@ void loop()
   }
 
   delay(100); // 루프 지연 시간
+}
+
+void onWifiCredentialsChanged()
+{
+  camera_deinit_system();
+  delay(500);
+  // WiFi, MQTT 해제 및 재초기화
+  // BLE 광고 일시 중단 등
 }

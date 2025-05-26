@@ -1,5 +1,7 @@
 #include "ble_provisioning.h"
 #include "device_identity.h"
+#include "camera_handler.h"
+#include "esp_camera.h"
 
 // 전역 인스턴스 생성
 BLEProvisioning bleProvisioning;
@@ -81,6 +83,7 @@ void BLEProvisioning::stop()
 void BLEProvisioning::WifiProvCallback::onWrite(BLECharacteristic *ch)
 {
     extern void safeMqttDisconnect(); // main.cpp에 정의된 MQTT 안전 해제 함수 사용
+    extern void onWifiCredentialsChanged();
     std::string value = ch->getValue();
     if (value.empty())
     {
@@ -162,6 +165,7 @@ void BLEProvisioning::WifiProvCallback::onWrite(BLECharacteristic *ch)
         Serial.println(F("[BLE] WiFi 연결 성공, BLE 서비스 일시 중단"));
         // 성공 시 BLE 서비스를 잠시 중단하여 WiFi 안정성 확보
         delay(5000);
+        onWifiCredentialsChanged();
     }
     else
     {
@@ -175,4 +179,9 @@ void BLEProvisioning::WifiScanCallback::onRead(BLECharacteristic *ch)
 {
     String networks = wifiManager.scanNetworks();
     ch->setValue(networks.c_str());
+}
+
+void camera_deinit_system()
+{
+    esp_camera_deinit();
 }

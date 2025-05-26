@@ -14,4 +14,6 @@
  */
 bool camera_init_system();
 
+void camera_deinit_system();
+
 #endif // CAMERA_HANDLER_H

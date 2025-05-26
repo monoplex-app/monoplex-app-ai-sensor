@@ -37,16 +37,18 @@ bool camera_init_system()
     {
         Serial.println(F("[CAMERA] PSRAM 감지됨. 프레임버퍼에 PSRAM 사용."));
         s_camera_config.fb_location = CAMERA_FB_IN_PSRAM;
-        s_camera_config.jpeg_quality = 20;
+        s_camera_config.jpeg_quality = 10;
         s_camera_config.grab_mode = CAMERA_GRAB_LATEST;
+        s_camera_config.frame_size = FRAMESIZE_UXGA;
+        s_camera_config.fb_count = 2;
     }
     else
     {
         Serial.println(F("[CAMERA] PSRAM 없음. 프레임버퍼에 DRAM 사용."));
         s_camera_config.fb_location = CAMERA_FB_IN_DRAM;
         s_camera_config.jpeg_quality = 12;
+        s_camera_config.fb_count = 1;
     }
-    s_camera_config.fb_count = 1; // fb_count는 공통적으로 설정
 
     esp_err_t err = esp_camera_init(&s_camera_config);
     if (err != ESP_OK)
