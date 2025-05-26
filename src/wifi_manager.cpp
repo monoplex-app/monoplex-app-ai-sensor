@@ -1,11 +1,12 @@
 #include "wifi_manager.h"
 #include <time.h>
 #include "certificate_manager.h"
+#include <esp_wifi.h>
 
 // 전역 인스턴스 생성
 WiFiManager wifiManager;
 
-WiFiManager::WiFiManager() : m_wifiClientSecure(nullptr), lastReconnectAttempt(0), connectRetryCount(0), m_pendingPostConnectionSetup(false)
+WiFiManager::WiFiManager() : m_wifiClientSecure(nullptr), lastReconnectAttempt(0), connectRetryCount(0), m_pendingPostConnectionSetup(false), m_isReconnecting(false), m_disconnectTime(0)
 {
 }
 
@@ -40,13 +41,42 @@ bool WiFiManager::connect(const char *ssid, const char *password)
         return false;
     }
 
+    // 재연결 중이면 충분한 시간 대기
+    if (m_isReconnecting)
+    {
+        if (millis() - m_disconnectTime < DISCONNECT_DELAY)
+        {
+            Serial.println(F("[WIFI] 재연결 대기 중..."));
+            return false;
+        }
+        m_isReconnecting = false;
+    }
+
     Serial.print(F("[WIFI] 연결 시도: "));
     Serial.println(ssid);
 
+    // 기존 연결이 있으면 안전하게 해제
     if (WiFi.isConnected())
     {
-        disconnect();
+        safeDisconnect();
+        // 추가 대기 시간
+        while (m_isReconnecting && (millis() - m_disconnectTime < DISCONNECT_DELAY))
+        {
+            delay(100);
+        }
+        m_isReconnecting = false;
     }
+
+    // WiFi 재시작 (드라이버 완전 재초기화)
+    esp_wifi_stop();
+    delay(100);
+    esp_wifi_deinit();
+    delay(100);
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    esp_wifi_init(&cfg);
+    esp_wifi_set_mode(WIFI_MODE_STA);
+    esp_wifi_start();
+    delay(500);
 
     Serial.println(F("ssid: "));
     Serial.println(ssid);
@@ -56,10 +86,20 @@ bool WiFiManager::connect(const char *ssid, const char *password)
     WiFi.begin(ssid, password);
 
     unsigned long startTime = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - startTime < 10000)
+    while (WiFi.status() != WL_CONNECTED && millis() - startTime < 15000) // 15초로 연장
     {
-        delay(200);
+        delay(500); // 더 긴 간격
         Serial.print('.');
+
+        // 중간에 상태 체크
+        if (millis() - startTime > 7000 && WiFi.status() == WL_CONNECT_FAILED)
+        {
+            Serial.println(F("\n[WIFI] 연결 실패 감지, 재시도"));
+            WiFi.disconnect();
+            delay(1000);
+            WiFi.begin(ssid, password);
+            startTime = millis(); // 타이머 리셋
+        }
     }
     Serial.println();
 
@@ -68,16 +108,16 @@ bool WiFiManager::connect(const char *ssid, const char *password)
         Serial.print(F("[WIFI] 연결 성공! IP: "));
         Serial.println(WiFi.localIP().toString());
         connectRetryCount = 0;
-        m_pendingPostConnectionSetup = true; // 후처리 작업 플래그 설정
+        m_pendingPostConnectionSetup = true;
         return true;
     }
     else
     {
         Serial.println(F("[WIFI] 연결 실패 (타임아웃)"));
-        WiFi.disconnect(true);
+        safeDisconnect();
         connectRetryCount++;
         Serial.printf("[WIFI] 연결 재시도 횟수: %d/%d\n", connectRetryCount, MAX_CONNECT_RETRIES);
-        m_pendingPostConnectionSetup = false; // 실패 시 플래그 해제
+        m_pendingPostConnectionSetup = false;
         return false;
     }
 }
@@ -133,6 +173,16 @@ bool WiFiManager::isConnected() const
 
 void WiFiManager::update()
 {
+    // 재연결 중이면 처리 안함
+    if (m_isReconnecting)
+    {
+        if (millis() - m_disconnectTime >= DISCONNECT_DELAY)
+        {
+            m_isReconnecting = false;
+        }
+        return;
+    }
+
     if (!isConnected())
     {
         unsigned long currentMillis = millis();
@@ -149,10 +199,6 @@ void WiFiManager::update()
             {
                 Serial.println(F("[WIFI] 최대 연결 재시도 횟수 도달. 저장된 WiFi 설정을 삭제합니다."));
                 clearSavedSettings();
-                // 여기서 connectRetryCount를 0으로 리셋하거나,
-                // 혹은 특정 상태 플래그를 설정하여 더 이상 자동 재연결을 시도하지 않도록 할 수 있습니다.
-                // 현재는 설정만 삭제하고, connectRetryCount는 유지하여 수동 연결 시 다시 카운트되도록 합니다.
-                // 만약 완전히 멈추고 싶다면 connectRetryCount를 MAX_CONNECT_RETRIES보다 큰 값으로 설정할 수 있습니다.
             }
         }
     }
@@ -296,5 +342,31 @@ void WiFiManager::handlePostConnectionSetup()
 
         m_pendingPostConnectionSetup = false; // 작업 완료 후 플래그 해제
         Serial.println(F("[WIFI] 연결 후 설정 작업 완료."));
+    }
+}
+
+void WiFiManager::safeDisconnect()
+{
+    if (WiFi.isConnected() && !m_isReconnecting)
+    {
+        Serial.println(F("[WIFI] 안전한 연결 해제 시작"));
+        m_isReconnecting = true;
+
+        // 1. MQTT 연결 먼저 해제 (main.cpp에서 처리)
+
+        // 2. WiFi 연결 해제
+        WiFi.disconnect(true);
+        delay(500); // WiFi 해제 대기
+
+        // 3. WiFi 모드 재설정
+        WiFi.mode(WIFI_OFF);
+        delay(1000); // 완전 해제 대기
+
+        // 4. WiFi 모드 다시 설정
+        WiFi.mode(WIFI_STA);
+        delay(500);
+
+        m_disconnectTime = millis();
+        Serial.println(F("[WIFI] 안전한 연결 해제 완료"));
     }
 }

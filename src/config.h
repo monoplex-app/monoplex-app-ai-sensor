@@ -45,8 +45,8 @@ const unsigned long MQTT_STATUS_CHECK_INTERVAL = 60000; // 60초
 const unsigned long CERT_RETRY_TIMEOUT = 120;           // 2분(초 단위)
 
 // 버퍼 크기
-const size_t JSON_BUFFER_SIZE = 384;
-const size_t MQTT_BUFFER_SIZE = 4096;
+const size_t JSON_BUFFER_SIZE = 128;
+const size_t MQTT_BUFFER_SIZE = 2048;
 const size_t CERT_TOKEN_SIZE = 256;
 const size_t DEVICE_ID_SIZE = 17;     // MLX_ + 12자리 MAC + NULL 종료자
 const size_t AWS_CLIENT_ID_SIZE = 20; // "esp32-" + 12자리 MAC + NULL

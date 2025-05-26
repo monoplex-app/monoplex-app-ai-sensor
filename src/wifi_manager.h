@@ -44,6 +44,10 @@ public:
     // Wi-Fi 연결 후 처리 작업 수행
     void handlePostConnectionSetup();
 
+    // 안전한 연결 해제 메서드
+    void safeDisconnect();
+    bool isReconnecting() const { return m_isReconnecting; }
+
 private:
     Preferences preferences;
     unsigned long lastReconnectAttempt;
@@ -51,6 +55,11 @@ private:
     static const int MAX_CONNECT_RETRIES = 3; // 최대 재시도 횟수
     bool m_pendingPostConnectionSetup;        // Wi-Fi 연결 후처리 작업 대기 플래그
     WiFiClientSecure *m_wifiClientSecure;     // WiFiClientSecure 객체 포인터 멤버 변수
+
+    // --- 추가: 안전한 재연결/해제 및 상태 추적용 멤버 ---
+    bool m_isReconnecting = false;                      // 재연결 중 플래그
+    unsigned long m_disconnectTime = 0;                 // 연결 해제 시간
+    static const unsigned long DISCONNECT_DELAY = 2000; // 2초 대기
 
     void readSavedSettings(char *ssid, size_t ssidSize, char *pass, size_t passSize);
     void clearSavedSettings(); // 저장된 WiFi 설정 삭제

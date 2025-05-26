@@ -80,6 +80,7 @@ void BLEProvisioning::stop()
 // WiFi 프로비저닝 콜백 구현
 void BLEProvisioning::WifiProvCallback::onWrite(BLECharacteristic *ch)
 {
+    extern void safeMqttDisconnect(); // main.cpp에 정의된 MQTT 안전 해제 함수 사용
     std::string value = ch->getValue();
     if (value.empty())
     {
@@ -116,10 +117,39 @@ void BLEProvisioning::WifiProvCallback::onWrite(BLECharacteristic *ch)
     // 상태 업데이트
     bleProvisioning.updateStatus("CONNECTING...");
 
-    // WiFi 저장 및 연결
+    // **중요: MQTT 연결 먼저 해제**
+    Serial.println(F("[BLE] 기존 MQTT 연결 해제"));
+    safeMqttDisconnect();
+
+    // WiFi 저장 및 연결 (안전한 방식 사용)
     wifiManager.saveSettings(ssid, password);
 
-    if (wifiManager.connect(ssid, password))
+    // BLE 연결을 잠시 중단하여 WiFi에 리소스 집중
+    Serial.println(F("[BLE] WiFi 연결을 위해 BLE 일시 중단"));
+    BLEDevice::getAdvertising()->stop();
+    delay(1000); // BLE 중단 대기
+
+    bool connectSuccess = false;
+    for (int retry = 0; retry < 3; retry++)
+    {
+        Serial.printf("[BLE] WiFi 연결 시도 %d/3\n", retry + 1);
+        if (wifiManager.connect(ssid, password))
+        {
+            connectSuccess = true;
+            break;
+        }
+        if (retry < 2) // 마지막 시도가 아니면
+        {
+            Serial.println(F("[BLE] 연결 실패, 잠시 대기 후 재시도"));
+            delay(2000);
+        }
+    }
+
+    // BLE 광고 재시작
+    Serial.println(F("[BLE] BLE 광고 재시작"));
+    BLEDevice::getAdvertising()->start();
+
+    if (connectSuccess)
     {
         // 연결 성공, IP 주소로 상태 업데이트
         char ipAddress[16];
@@ -128,10 +158,15 @@ void BLEProvisioning::WifiProvCallback::onWrite(BLECharacteristic *ch)
         char statusBuffer[20];
         snprintf(statusBuffer, sizeof(statusBuffer), "OK:%s", ipAddress);
         bleProvisioning.updateStatus(statusBuffer);
+
+        Serial.println(F("[BLE] WiFi 연결 성공, BLE 서비스 일시 중단"));
+        // 성공 시 BLE 서비스를 잠시 중단하여 WiFi 안정성 확보
+        delay(5000);
     }
     else
     {
         bleProvisioning.updateStatus("FAIL:TIMEOUT");
+        Serial.println(F("[BLE] WiFi 연결 실패"));
     }
 }
 
