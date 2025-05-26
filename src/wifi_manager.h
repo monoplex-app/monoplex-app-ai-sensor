@@ -4,6 +4,7 @@
 #include <WiFi.h>
 #include <Preferences.h>
 #include "config.h"
+#include <WiFiClientSecure.h>
 
 class WiFiManager
 {
@@ -11,7 +12,7 @@ public:
     WiFiManager();
 
     // WiFi 초기화 및 저장된 설정으로 연결 시도
-    bool init();
+    bool init(WiFiClientSecure *client);
 
     // 저장된 WiFi 설정으로 연결 시도
     bool connectWithSavedSettings();
@@ -49,6 +50,7 @@ private:
     int connectRetryCount;                    // Wi-Fi 연결 재시도 횟수
     static const int MAX_CONNECT_RETRIES = 3; // 최대 재시도 횟수
     bool m_pendingPostConnectionSetup;        // Wi-Fi 연결 후처리 작업 대기 플래그
+    WiFiClientSecure *m_wifiClientSecure;     // WiFiClientSecure 객체 포인터 멤버 변수
 
     void readSavedSettings(char *ssid, size_t ssidSize, char *pass, size_t passSize);
     void clearSavedSettings(); // 저장된 WiFi 설정 삭제

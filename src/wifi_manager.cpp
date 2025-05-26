@@ -5,12 +5,13 @@
 // 전역 인스턴스 생성
 WiFiManager wifiManager;
 
-WiFiManager::WiFiManager() : lastReconnectAttempt(0), connectRetryCount(0), m_pendingPostConnectionSetup(false)
+WiFiManager::WiFiManager() : m_wifiClientSecure(nullptr), lastReconnectAttempt(0), connectRetryCount(0), m_pendingPostConnectionSetup(false)
 {
 }
 
-bool WiFiManager::init()
+bool WiFiManager::init(WiFiClientSecure *client)
 {
+    m_wifiClientSecure = client; // 멤버 변수에 WiFiClientSecure 객체 포인터 저장
     WiFi.mode(WIFI_STA);
     return connectWithSavedSettings();
 }
@@ -233,7 +234,65 @@ void WiFiManager::handlePostConnectionSetup()
 
         // 파일 시스템 초기화 및 인증서 초기화
         Serial.println(F("[WIFI] 인증서 관리자 초기화 시도..."));
-        certManager.init(); // 이 작업은 시간이 걸릴 수 있음
+        certManager.init(); // 반환값 없음. 내부적으로 파일시스템 및 기본 설정 초기화 가정.
+
+        bool certificatesLoaded = false;
+        if (certManager.loadRootCA())
+        { // 루트 CA 로드 시도
+            if (certManager.loadDeviceCert())
+            { // 디바이스 인증서 및 키 로드 시도
+                certificatesLoaded = true;
+                Serial.println(F("[CERT] 필요한 모든 인증서 로드 성공."));
+            }
+            else
+            {
+                Serial.println(F("[CERT_ERROR] 디바이스 인증서 또는 키 로드 실패."));
+            }
+        }
+        else
+        {
+            Serial.println(F("[CERT_ERROR] 루트 CA 인증서 로드 실패."));
+        }
+
+        // WiFiClientSecure에 인증서 설정
+        if (m_wifiClientSecure && certificatesLoaded)
+        {
+            Serial.println(F("[WIFI] WiFiClientSecure에 인증서 설정 중..."));
+
+            const char *rootCA_cstr = certManager.getRootCACert().c_str();
+            const char *clientCert_cstr = certManager.getDeviceCert().c_str();
+            const char *privateKey_cstr = certManager.getDeviceKey().c_str();
+
+            // certManager의 String 객체가 비어있지 않은지 추가로 확인 가능
+            if (strlen(rootCA_cstr) > 0 && strlen(clientCert_cstr) > 0 && strlen(privateKey_cstr) > 0)
+            {
+                m_wifiClientSecure->setCACert(rootCA_cstr);
+                m_wifiClientSecure->setCertificate(clientCert_cstr);
+                m_wifiClientSecure->setPrivateKey(privateKey_cstr);
+                Serial.println(F("[WIFI] WiFiClientSecure에 인증서 설정 완료."));
+            }
+            else
+            {
+                Serial.println(F("[WIFI_ERROR] 하나 이상의 인증서 내용이 비어있습니다. WiFiClientSecure 설정 실패."));
+                if (strlen(rootCA_cstr) == 0)
+                    Serial.println(F(" - 루트 CA 내용 없음"));
+                if (strlen(clientCert_cstr) == 0)
+                    Serial.println(F(" - 디바이스 인증서 내용 없음"));
+                if (strlen(privateKey_cstr) == 0)
+                    Serial.println(F(" - 디바이스 개인 키 내용 없음"));
+            }
+        }
+        else
+        {
+            if (!m_wifiClientSecure)
+            {
+                Serial.println(F("[WIFI_ERROR] WiFiClientSecure 객체가 초기화되지 않았습니다."));
+            }
+            if (!certificatesLoaded)
+            {
+                Serial.println(F("[WIFI_ERROR] 인증서 로드 실패. WiFiClientSecure에 인증서를 설정할 수 없습니다."));
+            }
+        }
 
         m_pendingPostConnectionSetup = false; // 작업 완료 후 플래그 해제
         Serial.println(F("[WIFI] 연결 후 설정 작업 완료."));
