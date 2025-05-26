@@ -5,6 +5,28 @@
 // 카메라 설정을 위한 정적 변수
 static camera_config_t s_camera_config;
 
+// 5. 카메라 설정 최적화 (camera_handler.cpp에서 사용)
+void optimizeCameraConfig(camera_config_t *config)
+{
+    // 메모리 사용량 최적화
+    config->frame_size = FRAMESIZE_QQVGA;   // 800x600 (UXGA 대신)
+    config->jpeg_quality = 20;              // 품질 조정 (10-63, 낮을수록 고품질)
+    config->fb_count = 1;                   // 프레임 버퍼 개수 최소화
+    config->grab_mode = CAMERA_GRAB_LATEST; // 최신 프레임만 사용
+
+    // PSRAM 사용 설정
+    if (psramFound())
+    {
+        config->fb_location = CAMERA_FB_IN_PSRAM;
+        Serial.println("[CAMERA] PSRAM 사용 설정 (최적화)");
+    }
+    else
+    {
+        config->fb_location = CAMERA_FB_IN_DRAM;
+        Serial.println("[CAMERA] DRAM 사용 설정 (최적화)");
+    }
+}
+
 bool camera_init_system()
 {
     s_camera_config.ledc_channel = LEDC_CHANNEL_0;
@@ -29,25 +51,29 @@ bool camera_init_system()
     // xclk_freq_hz 값은 이전 논의를 바탕으로 6MHz 또는 20MHz 중 안정적인 값을 선택합니다.
     // 현재는 6MHz로 설정되어 있습니다. (사용자가 수정한 값 유지)
     s_camera_config.xclk_freq_hz = 6000000;
-    s_camera_config.frame_size = FRAMESIZE_SVGA;
+    // s_camera_config.frame_size = FRAMESIZE_UXGA;
+    s_camera_config.frame_size = FRAMESIZE_QQVGA;
     s_camera_config.pixel_format = PIXFORMAT_JPEG;
     s_camera_config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
+
+    // << 사용자 요청: 최적화 함수 호출 위치 >>
+    optimizeCameraConfig(&s_camera_config); // 여기서 호출
 
     if (psramFound())
     {
         Serial.println(F("[CAMERA] PSRAM 감지됨. 프레임버퍼에 PSRAM 사용."));
-        s_camera_config.fb_location = CAMERA_FB_IN_PSRAM;
-        s_camera_config.jpeg_quality = 10;
-        s_camera_config.grab_mode = CAMERA_GRAB_LATEST;
-        s_camera_config.frame_size = FRAMESIZE_UXGA;
-        s_camera_config.fb_count = 2;
+        // s_camera_config.fb_location = CAMERA_FB_IN_PSRAM; // optimizeCameraConfig에서 설정
+        // s_camera_config.jpeg_quality = 10; // optimizeCameraConfig에서 설정
+        // s_camera_config.grab_mode = CAMERA_GRAB_LATEST; // optimizeCameraConfig에서 설정
+        // s_camera_config.frame_size = FRAMESIZE_UXGA; // optimizeCameraConfig에서 FRAMESIZE_SVGA로 변경
+        // s_camera_config.fb_count = 2; // optimizeCameraConfig에서 1로 변경
     }
     else
     {
         Serial.println(F("[CAMERA] PSRAM 없음. 프레임버퍼에 DRAM 사용."));
-        s_camera_config.fb_location = CAMERA_FB_IN_DRAM;
-        s_camera_config.jpeg_quality = 12;
-        s_camera_config.fb_count = 1;
+        // s_camera_config.fb_location = CAMERA_FB_IN_DRAM; // optimizeCameraConfig에서 설정
+        // s_camera_config.jpeg_quality = 20; // optimizeCameraConfig에서 설정
+        // s_camera_config.fb_count = 1; // optimizeCameraConfig에서 설정
     }
 
     esp_err_t err = esp_camera_init(&s_camera_config);

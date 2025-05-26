@@ -1,6 +1,8 @@
 #pragma once
 
+#ifndef CAMERA_MODEL_ESP32S3_EYE
 #define CAMERA_MODEL_ESP32S3_EYE // 사용 중인 카메라 모델
+#endif
 
 #include <Arduino.h>
 
