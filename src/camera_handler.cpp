@@ -9,9 +9,9 @@ static camera_config_t s_camera_config;
 void optimizeCameraConfig(camera_config_t *config)
 {
     // 메모리 사용량 최적화
-    config->frame_size = FRAMESIZE_QQVGA;   // 800x600 (UXGA 대신)
-    config->jpeg_quality = 20;              // 품질 조정 (10-63, 낮을수록 고품질)
-    config->fb_count = 1;                   // 프레임 버퍼 개수 최소화
+    config->frame_size = FRAMESIZE_UXGA;    // 800x600 (UXGA 대신)
+    config->jpeg_quality = 32;              // 품질 조정 (10-63, 낮을수록 고품질)
+    config->fb_count = 2;                   // 프레임 버퍼 개수 최소화
     config->grab_mode = CAMERA_GRAB_LATEST; // 최신 프레임만 사용
 
     // PSRAM 사용 설정
@@ -52,7 +52,7 @@ bool camera_init_system()
     // 현재는 6MHz로 설정되어 있습니다. (사용자가 수정한 값 유지)
     s_camera_config.xclk_freq_hz = 6000000;
     // s_camera_config.frame_size = FRAMESIZE_UXGA;
-    s_camera_config.frame_size = FRAMESIZE_QQVGA;
+    s_camera_config.frame_size = FRAMESIZE_UXGA;
     s_camera_config.pixel_format = PIXFORMAT_JPEG;
     s_camera_config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
 

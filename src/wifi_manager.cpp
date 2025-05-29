@@ -356,21 +356,21 @@ void WiFiManager::safeDisconnect()
 
         // 2. WiFi 연결 해제
         WiFi.disconnect(true);
-        delay(1000); // WiFi 해제 대기 (500 → 1000ms로 증가)
+        delay(500);
 
         // 3. WiFi 모드 재설정
         WiFi.mode(WIFI_OFF);
-        delay(1000); // 완전 해제 대기
+        delay(500);
 
         // 4. WiFi 드라이버 완전 해제
         esp_wifi_stop();
-        delay(1000); // 드라이버 stop 후 대기
+        delay(50);
         esp_wifi_deinit();
-        delay(1000); // 드라이버 deinit 후 대기
+        delay(50);
 
         // 5. WiFi 모드 다시 설정
         WiFi.mode(WIFI_STA);
-        delay(500);
+        delay(50);
 
         m_disconnectTime = millis();
         Serial.println(F("[WIFI] 안전한 연결 해제 완료"));

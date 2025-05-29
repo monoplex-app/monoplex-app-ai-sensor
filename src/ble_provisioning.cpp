@@ -150,7 +150,10 @@ void BLEProvisioning::WifiProvCallback::onWrite(BLECharacteristic *ch)
 
     // BLE 광고 재시작
     Serial.println(F("[BLE] BLE 광고 재시작"));
-    BLEDevice::getAdvertising()->start();
+    if (BLEDevice::getAdvertising())
+    {
+        BLEDevice::getAdvertising()->start();
+    }
 
     if (connectSuccess)
     {
