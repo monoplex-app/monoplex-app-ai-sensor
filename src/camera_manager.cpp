@@ -5,6 +5,7 @@
 #include <BLEDevice.h>
 #include <Wire.h>
 #include "esp_heap_caps.h"
+#include "driver/gpio.h" // GPIO 제어용
 
 // 내부 상태 변수
 static bool g_camera_initialized = false;
@@ -22,19 +23,19 @@ static void check_memory()
 // 카메라 설정 최적화 (내부 함수)
 static void optimize_camera_config(camera_config_t *config)
 {
-    // 메모리 사용량 최적화
-    config->frame_size = FRAMESIZE_UXGA;    // 800x600 (UXGA 대신)
-    config->jpeg_quality = 32;              // 품질 조정 (10-63, 낮을수록 고품질)
-    config->fb_count = 2;                   // 프레임 버퍼 개수 최소화
-    config->grab_mode = CAMERA_GRAB_LATEST; // 최신 프레임만 사용
+    // 메모리 사용량 최적화 - 안전한 JPEG 설정
+    config->frame_size = FRAMESIZE_UXGA;        // 성공한 QVGA 크기 유지
+    config->jpeg_quality = 32;                  // 최저 품질 (63 = 최대 압축)
+    config->fb_count = 2;                       // 프레임 버퍼 개수를 1로 최소화
+    config->grab_mode = CAMERA_GRAB_WHEN_EMPTY;
 
     // PSRAM 사용 설정
     if (psramFound()) {
         config->fb_location = CAMERA_FB_IN_PSRAM;
-        Serial.println("[CAMERA] PSRAM 사용 설정 (최적화)");
+        Serial.println("[CAMERA] PSRAM 사용 설정 (안전한 JPEG)");
     } else {
         config->fb_location = CAMERA_FB_IN_DRAM;
-        Serial.println("[CAMERA] DRAM 사용 설정 (최적화)");
+        Serial.println("[CAMERA] DRAM 사용 설정 (안전한 JPEG)");
     }
 }
 
@@ -89,8 +90,8 @@ bool camera_init_system()
     s_camera_config.pin_reset = RESET_GPIO_NUM;
 
     // 기본 카메라 설정
-    s_camera_config.xclk_freq_hz = 6000000;
-    s_camera_config.frame_size = FRAMESIZE_UXGA;
+    s_camera_config.xclk_freq_hz = 6000000;   // 6MHz 클럭 유지
+    s_camera_config.frame_size = FRAMESIZE_UXGA; 
     s_camera_config.pixel_format = PIXFORMAT_JPEG;
     s_camera_config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
 
@@ -138,31 +139,6 @@ bool camera_init_system()
     }
     
     Serial.println(F("[CAMERA] esp_camera_init 성공."));
-    
-    // 카메라 초기화 후 센서 안정화 대기
-    delay(300);
-
-    // 센서 설정
-    sensor_t *s = esp_camera_sensor_get();
-    if (s == NULL) {
-        Serial.println(F("[CAMERA] 카메라 센서 가져오기 실패!"));
-        return false;
-    }
-    s->set_vflip(s, 1);
-    s->set_brightness(s, 1);
-    s->set_saturation(s, 0);
-    Serial.println(F("[CAMERA] 카메라 센서 설정 적용 완료."));
-    
-    // 센서 설정 후 안정화 대기
-    delay(200);
-    
-    // 카메라 초기화 성공 후 I2C 센서 재초기화
-    Serial.println(F("[CAMERA] 센서 I2C 재연결"));
-    Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN); // 센서용 I2C 핀으로 복원
-    delay(100);
-    
-    // I2C 재연결 후 최종 안정화
-    delay(200);
     
     return true;
 }
@@ -225,41 +201,86 @@ camera_fb_t* camera_manager_capture_safe(int max_retries)
 
     sensor_t *s = esp_camera_sensor_get();
     if (!s) {
-        Serial.println("[CAMERA] 센서 포인터 없음!");
+        Serial.println("[CAMERA] 센서 포인터 없음! 카메라가 초기화되지 않았습니다.");
         return nullptr;
     }
+    
+    // 캡처 전 센서 상태 확인
+    Serial.println(F("[CAMERA] 캡처 전 센서 상태 확인..."));
+    
+    // 센서 ID 확인 시도
+    sensor_id_t* sensor_id = &s->id;
+    Serial.printf("[CAMERA] 센서 정보: PID=0x%02X, VER=0x%02X, MIDL=0x%02X, MIDH=0x%02X\n", 
+                  sensor_id->PID, sensor_id->VER, sensor_id->MIDL, sensor_id->MIDH);
+    
+    delay(100);
+
+    // 첫 번째 프레임 버리기 (웜업)
+    Serial.println(F("[CAMERA] 카메라 웜업 - 첫 번째 프레임 버리기..."));
+    camera_fb_t *warmup_fb = esp_camera_fb_get();
+    if (warmup_fb) {
+        esp_camera_fb_return(warmup_fb);
+        Serial.println(F("[CAMERA] 웜업 프레임 정상 처리됨"));
+    } else {
+        Serial.println(F("[CAMERA] 웜업 프레임 실패 - 계속 진행"));
+    }
+    delay(500); // 웜업 후 안정화
 
     for (int i = 0; i < max_retries; i++) {
         Serial.printf("[CAMERA] Capturing image (attempt %d/%d)...\n", i + 1, max_retries);
 
         if (i > 0) {
-            delay(500);
+            Serial.printf("[CAMERA] 재시도 대기 중... (%d초)\n", i * 2);
+            delay(i * 2000); // 재시도마다 대기시간 증가
         }
 
         if (i > 1) {
             ESP.getFreeHeap();
-            delay(100);
+            delay(200); // 100ms에서 200ms로 증가
         }
 
         camera_fb_t *fb = esp_camera_fb_get();
         if (fb) {
             if (fb->len > 0 && fb->buf != nullptr) {
-                Serial.printf("[CAMERA] Image captured: %dx%d, size: %zu bytes\n",
+                Serial.printf("[CAMERA] JPEG image captured: %dx%d, size: %zu bytes\n",
                               fb->width, fb->height, fb->len);
                 return fb;
             } else {
-                Serial.println("[CAMERA] 유효하지 않은 프레임 데이터");
+                Serial.println("[CAMERA] 유효하지 않은 프레임 데이터 - 길이나 버퍼가 비어있음");
+                Serial.printf("[CAMERA] fb->len=%zu, fb->buf=%p\n", fb->len, fb->buf);
                 esp_camera_fb_return(fb);
             }
         } else {
-            Serial.println("[CAMERA] esp_camera_fb_get() failed.");
+            Serial.println("[CAMERA] esp_camera_fb_get() failed - NULL 반환");
+            
+            // 추가 진단 정보
+            if (i == 0) {
+                Serial.println("[CAMERA] === 카메라 진단 정보 ===");
+                Serial.printf("[CAMERA] PSRAM 사용 가능: %s\n", psramFound() ? "예" : "아니오");
+                Serial.printf("[CAMERA] 현재 메모리 상태:\n");
+                check_memory();
+                Serial.println("[CAMERA] ========================");
+            }
         }
 
         if (i == max_retries - 2) {
-            Serial.println("[CAMERA] 센서 설정 재적용 시도...");
+            Serial.println("[CAMERA] 센서 하드웨어 리셋 시도...");
+            
+            // 센서 하드웨어 리셋 (RESET 핀이 있는 경우)
+            if (RESET_GPIO_NUM != -1) {
+                Serial.println("[CAMERA] RESET 핀으로 센서 리셋...");
+                gpio_set_direction((gpio_num_t)RESET_GPIO_NUM, GPIO_MODE_OUTPUT);
+                gpio_set_level((gpio_num_t)RESET_GPIO_NUM, 0); // 리셋 활성화
+                delay(100);
+                gpio_set_level((gpio_num_t)RESET_GPIO_NUM, 1); // 리셋 해제
+                delay(500);
+            }
+            
+            // 센서 설정 재적용
+            Serial.println("[CAMERA] 센서 설정 재적용 시도 (안전한 JPEG)...");
             s->set_pixformat(s, PIXFORMAT_JPEG);
-            s->set_framesize(s, FRAMESIZE_SVGA);
-            s->set_quality(s, 15);
+            s->set_framesize(s, FRAMESIZE_QVGA);
+            s->set_quality(s, 63); // 최저 품질로 안전하게
             s->set_brightness(s, 0);
             s->set_contrast(s, 0);
             s->set_saturation(s, 0);
@@ -267,11 +288,18 @@ camera_fb_t* camera_manager_capture_safe(int max_retries)
             s->set_awb_gain(s, 1);
             s->set_exposure_ctrl(s, 1);
             s->set_gain_ctrl(s, 1);
-            delay(300);
+            delay(1000); // 더 긴 안정화 시간
         }
     }
 
-    Serial.println("[CAMERA] Camera capture failed after all attempts.");
+    Serial.println("[CAMERA] ❌ 모든 시도 후에도 카메라 캡처 실패");
+    Serial.println("[CAMERA] 가능한 원인:");
+    Serial.println("[CAMERA] 1. 카메라 모듈이 물리적으로 연결되지 않음");
+    Serial.println("[CAMERA] 2. 잘못된 카메라 모델 설정 (현재: ESP32S3_EYE)");
+    Serial.println("[CAMERA] 3. 전원 공급 부족 또는 불안정");
+    Serial.println("[CAMERA] 4. 클럭 주파수나 타이밍 문제");
+    Serial.println("[CAMERA] 5. 센서 초기화 타이밍 문제");
+    
     return nullptr;
 }
 
