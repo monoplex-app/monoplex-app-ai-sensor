@@ -1,6 +1,7 @@
 #include "ble_provisioning.h"
 #include "device_identity.h"
-#include "camera_handler.h"
+#include "camera_manager.h"
+#include "mqtt_manager.h"
 #include "esp_camera.h"
 
 // 전역 인스턴스 생성
@@ -82,8 +83,6 @@ void BLEProvisioning::stop()
 // WiFi 프로비저닝 콜백 구현
 void BLEProvisioning::WifiProvCallback::onWrite(BLECharacteristic *ch)
 {
-    extern void safeMqttDisconnect(); // main.cpp에 정의된 MQTT 안전 해제 함수 사용
-    // extern void onWifiCredentialsChanged();
     std::string value = ch->getValue();
     if (value.empty())
     {
@@ -92,6 +91,11 @@ void BLEProvisioning::WifiProvCallback::onWrite(BLECharacteristic *ch)
     }
 
     Serial.println(F("[BLE] WiFi 자격증명 수신"));
+    Serial.print(F("[BLE] 수신 데이터 길이: "));
+    Serial.println(value.length());
+    Serial.print(F("[BLE] 수신 원본 데이터: '"));
+    Serial.print(value.c_str());
+    Serial.println(F("'"));
 
     // 고정 크기 버퍼 사용 - 스택 메모리 활용
     char credentials[64] = {0}; // SSID + 구분자 + 비밀번호 저장용
@@ -102,6 +106,10 @@ void BLEProvisioning::WifiProvCallback::onWrite(BLECharacteristic *ch)
     size_t valueLen = value.length() > sizeof(credentials) - 1 ? sizeof(credentials) - 1 : value.length();
     memcpy(credentials, value.data(), valueLen);
     credentials[valueLen] = '\0';
+    
+    Serial.print(F("[BLE] 복사된 자격증명: '"));
+    Serial.print(credentials);
+    Serial.println(F("'"));
 
     // SSID와 비밀번호 분리
     char *delimiter = strchr(credentials, '|');
@@ -116,13 +124,20 @@ void BLEProvisioning::WifiProvCallback::onWrite(BLECharacteristic *ch)
     *delimiter = '\0';
     strncpy(ssid, credentials, sizeof(ssid) - 1);
     strncpy(password, delimiter + 1, sizeof(password) - 1);
+    
+    Serial.print(F("[BLE] 파싱된 SSID: '"));
+    Serial.print(ssid);
+    Serial.println(F("'"));
+    Serial.print(F("[BLE] 파싱된 비밀번호: '"));
+    Serial.print(password);
+    Serial.println(F("'"));
 
     // 상태 업데이트
     bleProvisioning.updateStatus("CONNECTING...");
 
     // **중요: MQTT 연결 먼저 해제**
     Serial.println(F("[BLE] 기존 MQTT 연결 해제"));
-    safeMqttDisconnect();
+    mqtt_manager_disconnect();
 
     // WiFi 저장 및 연결 (안전한 방식 사용)
     wifiManager.saveSettings(ssid, password);
@@ -184,7 +199,3 @@ void BLEProvisioning::WifiScanCallback::onRead(BLECharacteristic *ch)
     ch->setValue(networks.c_str());
 }
 
-void camera_deinit_system()
-{
-    esp_camera_deinit();
-}

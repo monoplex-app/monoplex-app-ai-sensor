@@ -78,10 +78,14 @@ bool WiFiManager::connect(const char *ssid, const char *password)
     esp_wifi_start();
     delay(500);
 
-    Serial.println(F("ssid: "));
-    Serial.println(ssid);
-    Serial.println(F("password: "));
-    Serial.println(password);
+    Serial.print(F("[WIFI] 연결할 SSID: '"));
+    Serial.print(ssid);
+    Serial.println(F("'"));
+    Serial.print(F("[WIFI] 사용할 비밀번호: '"));
+    Serial.print(password);
+    Serial.println(F("'"));
+    Serial.print(F("[WIFI] 비밀번호 길이: "));
+    Serial.println(strlen(password));
 
     WiFi.begin(ssid, password);
 
@@ -229,6 +233,15 @@ void WiFiManager::readSavedSettings(char *ssid, size_t ssidSize, char *pass, siz
     if (stored_ssid.length() > 0)
     {
         Serial.println(F("[NVS] 저장된 WiFi 설정 로드"));
+        Serial.print(F("[NVS] 저장된 SSID: '"));
+        Serial.print(stored_ssid);
+        Serial.println(F("'"));
+        Serial.print(F("[NVS] 저장된 비밀번호: '"));
+        Serial.print(stored_pass);
+        Serial.println(F("'"));
+        Serial.print(F("[NVS] 저장된 비밀번호 길이: "));
+        Serial.println(stored_pass.length());
+        
         stored_ssid.toCharArray(ssid, ssidSize);
         stored_pass.toCharArray(pass, passSize);
     }
