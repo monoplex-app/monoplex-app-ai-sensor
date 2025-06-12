@@ -21,7 +21,7 @@ const char PROVISIONING_TEMPLATE_NAME[] PROGMEM = "MonoplexProvisioningTemplate"
 #define AWS_MQTT_PORT 8883
 
 // S3 업로드 기본 설정
-const char S3_DEFAULT_URL[] PROGMEM = "https://monoplex-esp32-image-test-bucket-2025-05-22.s3.amazonaws.com/images/test-image.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA57VDLR6OGZOOJLGP%2F20250604%2Fap-northeast-2%2Fs3%2Faws4_request&X-Amz-Date=20250604T024218Z&X-Amz-Expires=604800&X-Amz-SignedHeaders=content-type%3Bhost&X-Amz-Signature=0cc5f74456d545e0359c0a269c269a759bbbc7df5d86beea3f062d41a39058b6";
+const char S3_DEFAULT_URL[] PROGMEM = "https://monoplex-esp32-image-test-bucket-2025-05-22.s3.amazonaws.com/images/test-image.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA57VDLR6OGZOOJLGP%2F20250609%2Fap-northeast-2%2Fs3%2Faws4_request&X-Amz-Date=20250609T070653Z&X-Amz-Expires=604800&X-Amz-SignedHeaders=content-type%3Bhost&X-Amz-Signature=9e01d860a645aa81bdbdecb718e2fc26365cb9e8cc21607d7e037221566729da";
 const char S3_DEFAULT_HOST[] PROGMEM = "monoplex-esp32-image-test-bucket-2025-05-22.s3.amazonaws.com";
 #define S3_UPLOAD_CHUNK_SIZE 16384
 
