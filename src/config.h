@@ -1,73 +1,58 @@
-#pragma once
+// include guard
+#ifndef CONFIG_H
+#define CONFIG_H
 
-#ifndef CAMERA_MODEL_ESP32S3_EYE
-#define CAMERA_MODEL_ESP32S3_EYE // 사용 중인 카메라 모델
-#endif
+// 시리얼 바운드 레이트
+#define SERIAL_BAUD_RATE 115200
 
-#include <Arduino.h>
-
-// WiFi 및 BLE 설정
-#define WIFI_RSSI_THRES -75
-#define SERVICE_UUID "c20b0d0e-d8c2-4741-b26b-4e639bc40001"
-#define DEVICE_ID_CHAR_UUID "c20b0d0e-d8c2-4741-b26b-4e639bc41001"
-#define WIFI_PROV_CHAR_UUID "c20b0d0e-d8c2-4741-b26b-4e639bc41002"
-#define STATUS_CHAR_UUID "c20b0d0e-d8c2-4741-b26b-4e639bc41003"
-#define WIFI_SCAN_CHAR_UUID "c20b0d0e-d8c2-4741-b26b-4e639bc41004"
-
-// AWS IoT Core 설정
-const char AWS_IOT_ENDPOINT[] PROGMEM = "ac1scbno22vjk-ats.iot.ap-northeast-2.amazonaws.com";
-const char PROVISIONING_TEMPLATE_NAME[] PROGMEM = "MonoplexProvisioningTemplate";
-
-// NTP 설정
-const char NTP_SERVER[] PROGMEM = "pool.ntp.org";
-const long GMT_OFFSET_SEC = 9 * 3600;
-const int DAYLIGHT_OFFSET_SEC = 0;
-
-// 파일 경로
-const char LFS_ROOT_CA_PATH[] PROGMEM = "/root_ca.pem";
-const char LFS_CLAIM_CRT_PATH[] PROGMEM = "/claim.crt";
-const char LFS_CLAIM_KEY_PATH[] PROGMEM = "/claim.key";
-const char LFS_DEVICE_CRT_PATH[] PROGMEM = "/device.crt";
-const char LFS_DEVICE_KEY_PATH[] PROGMEM = "/device.key";
-
-// MQTT 토픽
-const char CERTIFICATE_CREATE_TOPIC[] PROGMEM = "$aws/certificates/create/json";
-const char CERTIFICATE_CREATE_ACCEPTED_TOPIC[] PROGMEM = "$aws/certificates/create/json/accepted";
-const char CERTIFICATE_CREATE_REJECTED_TOPIC[] PROGMEM = "$aws/certificates/create/json/rejected";
-
-const char PROVISIONING_REQUEST_TOPIC[] PROGMEM = "$aws/provisioning-templates/MonoplexProvisioningTemplate/provision/json";
-const char PROVISIONING_ACCEPTED_TOPIC[] PROGMEM = "$aws/provisioning-templates/MonoplexProvisioningTemplate/provision/json/accepted";
-const char PROVISIONING_REJECTED_TOPIC[] PROGMEM = "$aws/provisioning-templates/MonoplexProvisioningTemplate/provision/json/rejected";
-
-// 타이머 설정
-const unsigned long WIFI_RECONNECT_INTERVAL = 10000;    // 10초
-const unsigned long MQTT_RECONNECT_INTERVAL = 5000;     // 5초
-const unsigned long MQTT_KEEP_ALIVE = 120;              // 120초
-const unsigned long MQTT_STATUS_CHECK_INTERVAL = 60000; // 60초
-const unsigned long CERT_RETRY_TIMEOUT = 120;           // 2분(초 단위)
-
-// 버퍼 크기
-const size_t JSON_BUFFER_SIZE = 128;
-const size_t MQTT_BUFFER_SIZE = 2048;
-const size_t CERT_TOKEN_SIZE = 256;
-const size_t DEVICE_ID_SIZE = 17;     // MLX_ + 12자리 MAC + NULL 종료자
-const size_t AWS_CLIENT_ID_SIZE = 20; // "esp32-" + 12자리 MAC + NULL
-
-// FPSTR 매크로 결과를 const char*로 변환하는 헬퍼 함수
-inline const char *fpstr_to_cstr(const __FlashStringHelper *fpstr)
-{
-    return reinterpret_cast<const char *>(fpstr);
-}
-
-// LED 핀 (외주 코드 및 현재 프로젝트 필요에 따라 통합)
-#define LED_BLUE 2 // 현재 프로젝트의 기존 핀과 충돌 여부 확인
-#define LED_RED 20 // 현재 프로젝트의 기존 핀과 충돌 여부 확인
+// 핀 정의
+#define LED_BLUE 2
+#define LED_RED 20
 #define LED_ON 0
 #define LED_OFF 1
 #define LIGHT 19
 #define LIGHT_OFF 0
 #define LIGHT_ON 1
 
-// I2C 핀 (센서용 - 외주 코드 기준)
+#define LIGHT_NIGHT_THRESHOLD 10.0 // 이 값보다 조도가 낮으면 조명 켬
+
+// I2C 핀
 #define I2C_SDA_PIN 41
 #define I2C_SCL_PIN 42
+
+// BLE 설정
+#define BLE_DEVICE_NAME "MONOPLEX AI SENSOR"
+#define SERVER_SERVICE_UUID "4fafc201-1fb5-459e-8fcc-31914cc5c9c3"
+#define SERVER_CHARACTERISTIC_UUID "9f549a79-f038-47df-b252-3a330ec61ebf"
+#define MAX_BLE_RETRY 5
+
+// 카메라 설정
+// CAMERA_MODEL_ESP32S3_EYE는 PlatformIO에서 자동 정의됨 - 중복 정의 방지
+#ifndef CAMERA_MODEL_ESP32S3_EYE
+#define CAMERA_MODEL_ESP32S3_EYE // Has PSRAM
+#endif
+#include "camera_pins.h"
+
+// MQTT & AWS IoT 설정
+#define MQTTS_PORT 8883
+#define IOT_ENDPOINT "ac1scbno22vjk-ats.iot.ap-northeast-2.amazonaws.com"
+
+// 개발용: MQTT 연결 비활성화 (인증서 문제 시 임시 사용)
+// 실제 배포 시에는 이 줄을 주석처리하세요
+// #define DISABLE_MQTT_FOR_DEVELOPMENT  // 실제 인증서 적용으로 활성화
+
+// 인증서 변수 선언 (extern - 실제 정의는 config.cpp에서)
+extern const char* ROOT_CA_CERT;
+extern const char* CERTIFICATE_PEM;
+extern const char* PRIVATE_KEY;
+
+// EEPROM 설정
+#define EEPROM_SIZE 128
+#define EEPROM_INIT_FLAG_ADDR 0
+#define EEPROM_AP_INFO_FLAG_ADDR 1
+#define EEPROM_SSID_ADDR 32
+#define EEPROM_PASSWD_ADDR 64
+#define EEPROM_UID_ADDR 96
+#define EEPROM_INIT_CHECK_VALUE 0xA8
+
+#endif // CONFIG_H
