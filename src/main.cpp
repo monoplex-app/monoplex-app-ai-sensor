@@ -45,6 +45,16 @@ void setup() {
     bool cameraInitResult = initCamera();
     Serial.printf("카메라 초기화 결과: %s\n", cameraInitResult ? "성공" : "실패");
 
+    // WiFi 스캔을 먼저 수행 (BLE에서 사용할 목록 준비)
+    Serial.println("주변 WiFi 네트워크 스캔 중...");
+    WiFi.mode(WIFI_STA);
+    delay(100);
+    String wifiListJson = scanWifiNetworks(deviceUid);
+    Serial.println("WiFi 스캔 완료, BLE 초기화 진행");
+    
+    // BLE 초기화 (스캔된 WiFi 목록을 사용)
+    initBLE(deviceUid, wifiListJson);
+    
     // 연결 초기화
     if (areWiFiCredentialsAvailable()) {
         initWiFi();
@@ -52,8 +62,6 @@ void setup() {
     
     // MQTT 초기화 (WiFi 초기화 후)
     initMQTT();
-    
-    initBLE(deviceUid);
     
     Serial.println("설정 완료. 메인 루프 진입");
 }

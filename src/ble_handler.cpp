@@ -55,7 +55,7 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks {
 
 void processBleData(const String& data); // 내부에서만 사용할 함수이므로 미리 선언
 
-void initBLE(const String& uid) {
+void initBLE(const String& uid, const String& preScannedWifiList) {
     Serial.println("BLE 초기화 시작...");
 
     // 1. BLE 장치 초기화 및 이름 설정
@@ -89,9 +89,14 @@ void initBLE(const String& uid) {
 
     Serial.println("BLE 서버 시작. 클라이언트 연결 대기...");
     
-    // 7. 클라이언트에게 보낼 첫 메시지(Wi-Fi AP 목록) 나중에 준비 (연결 시점에)
-    // 초기화 시점에는 WiFi 스캔을 하지 않음 (에러 방지)
-    apListJson = "";
+    // 7. 미리 스캔된 WiFi 목록 저장 (setup에서 전달받음)
+    if (preScannedWifiList.length() > 0) {
+        apListJson = preScannedWifiList;
+        Serial.println("미리 스캔된 WiFi 목록 저장 완료");
+    } else {
+        apListJson = "";
+        Serial.println("WiFi 목록이 비어있음");
+    }
 }
 
 void handleBLE() {
@@ -101,11 +106,16 @@ void handleBLE() {
         delay(500); // 클라이언트가 서비스를 탐색할 시간을 줌
         bleRetryCounter = 0;
         
-        // 연결 시점에 WiFi AP 목록을 스캔하여 전송
-        Serial.println("BLE 클라이언트 연결됨, WiFi 스캔 시작...");
-        String uid = getMacAddress();
-        apListJson = scanWifiNetworks(uid);
-        sendBleData(apListJson);
+        // 미리 스캔된 WiFi 목록 전송
+        Serial.println("BLE 클라이언트 연결됨, 저장된 WiFi 목록 전송");
+        if (apListJson.length() > 0) {
+            sendBleData(apListJson);
+        } else {
+            Serial.println("저장된 WiFi 목록이 없음");
+            String uid = getMacAddress();
+            String emptyList = "{\"macid\":\"" + uid + "\",\"numAp\":0,\"aplist\":[]}";
+            sendBleData(emptyList);
+        }
     }
     
     // 클라이언트로부터 새로운 데이터가 수신되었을 경우
@@ -166,15 +176,9 @@ void processBleData(const String& data) {
         Serial.print("deserializeJson() 실패: ");
         Serial.println(error.c_str());
         
-        // JSON 파싱 실패 시 단순 문자열 명령어 확인
+        // JSON 파싱 실패 시 스캔 명령어만 확인
         if (data == "scan" || data.indexOf("scan") >= 0) {
             Serial.println("스캔 명령어 감지, Wi-Fi 목록 재전송");
-            sendBleData(apListJson);
-            return;
-        }
-        
-        if (data == "hello") {
-            Serial.println("Hello 메시지 받음, Wi-Fi 목록 전송");
             sendBleData(apListJson);
             return;
         }

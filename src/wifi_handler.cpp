@@ -52,14 +52,14 @@ bool areWiFiCredentialsAvailable() {
 }
 
 String getMacAddress() {
-    // WiFi가 초기화되지 않은 경우를 대비하여 esp_wifi 사용
+    // BLE 연결과 일관성을 위해 Bluetooth MAC 주소 사용
     uint8_t mac[6];
-    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    esp_read_mac(mac, ESP_MAC_BT);
     
     char macStr[13] = {0};
     sprintf(macStr, "%02X%02X%02X%02X%02X%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     
-    Serial.print("ESP MAC 주소: ");
+    Serial.print("ESP Bluetooth MAC 주소: ");
     Serial.println(macStr);
     
     return String(macStr);
@@ -67,6 +67,23 @@ String getMacAddress() {
 
 String scanWifiNetworks(const String& macId) {
     Serial.println("WiFi 네트워크 스캔 시작...");
+    
+    // 현재 WiFi 연결 상태 저장
+    bool wasConnected = (WiFi.status() == WL_CONNECTED);
+    String currentSSID = "";
+    String currentPassword = "";
+    
+    if (wasConnected) {
+        currentSSID = ssid;
+        currentPassword = password;
+        Serial.println("WiFi 연결 중... 스캔을 위해 일시 해제");
+        WiFi.disconnect();
+        delay(500); // 연결 해제 대기
+    }
+    
+    // WiFi를 스캔 전용 모드로 설정
+    WiFi.mode(WIFI_STA);
+    delay(100);
     
     int numNetworks = WiFi.scanNetworks();
 
@@ -160,5 +177,12 @@ String scanWifiNetworks(const String& macId) {
     serializeJson(doc, jsonOutput);
     
     WiFi.scanDelete(); // 스캔 결과 메모리 해제
+    
+    // 이전에 연결되어 있었다면 다시 연결 시도
+    if (wasConnected && currentSSID.length() > 0) {
+        Serial.println("WiFi 스캔 완료, 이전 연결 복구 중...");
+        WiFi.begin(currentSSID.c_str(), currentPassword.c_str());
+    }
+    
     return jsonOutput;
 }

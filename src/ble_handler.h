@@ -13,7 +13,7 @@
  * @brief BLE 서버를 초기화하고 광고를 시작
  * @param uid 디바이스의 고유 ID(MAC 주소)로, Wi-Fi 스캔 결과를 전송할 때 사용
  */
-void initBLE(const String& uid);
+void initBLE(const String& uid, const String& preScannedWifiList = "");
 
 /**
  * @brief BLE 통신을 처리하는 메인 핸들러 함수
