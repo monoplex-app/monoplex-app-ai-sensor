@@ -38,34 +38,12 @@ void setup() {
     loadWiFiCredentials(ssid, password);
 
     // 하드웨어 초기화
-    Serial.println("핀 초기화 시작...");
     initPins();
-    Serial.println("핀 초기화 완료");
-    
-    Serial.println("센서 초기화 시작...");
     initSensors();
-    Serial.println("센서 초기화 완료");
-    
-    // 카메라 테스트는 상태 오염을 방지하기 위해 비활성화
-    // Serial.println("단순 카메라 테스트 먼저 시도...");
-    // simpleCameraTest();
-    
-    // 대안 테스트는 크래시를 유발하므로 비활성화
-    // Serial.println("대안 카메라 설정 테스트...");
-    // alternativeCameraTest();
     
     Serial.println("카메라 초기화 호출 시작...");
     bool cameraInitResult = initCamera();
     Serial.printf("카메라 초기화 결과: %s\n", cameraInitResult ? "성공" : "실패");
-    
-    if (cameraInitResult) {
-        Serial.println("카메라 초기화 성공");
-        // 부팅 시 테스트 촬영은 비활성화 (MQTT 명령으로만 촬영)
-        // delay(1000);
-        // testCameraCapture();
-    } else {
-        Serial.println("카메라 초기화 실패 - 카메라 없이 동작");
-    }
 
     // 연결 초기화
     if (areWiFiCredentialsAvailable()) {

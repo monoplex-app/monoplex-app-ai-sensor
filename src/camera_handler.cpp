@@ -280,7 +280,7 @@ static bool uploadImageToS3(camera_fb_t* fb, const String& url) {
     WiFiClientSecure uploadClient;
     uploadClient.setCACert(ROOT_CA_CERT); // config.h의 Root CA 사용
     
-    Serial.print("호스트 연결: ");
+    Serial.print("`: ");
     Serial.println(host);
 
     if (!uploadClient.connect(host.c_str(), 443)) {
