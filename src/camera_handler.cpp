@@ -65,7 +65,7 @@ bool initCamera() {
         Serial.println("PSRAM 감지됨 - 카메라 촬영 실패 방지 모드로 설정");
         
         // ========= 카메라 촬영 실패 방지 설정 =========
-        config.frame_size = FRAMESIZE_VGA;   // 해상도를 640x480으로 더 낮춤 (안정성 우선)
+        config.frame_size = FRAMESIZE_UXGA;   // 해상도를 640x480으로 더 낮춤 (안정성 우선)
         config.jpeg_quality = 20;            // JPEG 품질을 더 낮춤 (처리 부하 감소)
         config.fb_count = 2;                 // 더블 버퍼링 유지
         config.grab_mode = CAMERA_GRAB_WHEN_EMPTY; // 더 안전한 그랩 모드
@@ -269,24 +269,30 @@ static bool uploadImageToS3(camera_fb_t* fb, const String& url) {
     String host, path;
     int hostStart = url.indexOf("://") + 3;
     if (hostStart < 3) {
-        Serial.println("URL 형식 오류.");
+        Serial.println("❌ URL 형식 오류.");
         return false;
     }
     int pathStart = url.indexOf('/', hostStart);
     host = url.substring(hostStart, pathStart);
     path = url.substring(pathStart);
 
+    Serial.printf("S3 업로드 시작:\n");
+    Serial.printf("  호스트: %s\n", host.c_str());
+    Serial.printf("  경로: %s\n", path.c_str());
+    Serial.printf("  이미지 크기: %zu bytes\n", fb->len);
+
     // 2. 보안 클라이언트 설정 및 서버 연결
     WiFiClientSecure uploadClient;
     uploadClient.setCACert(ROOT_CA_CERT); // config.h의 Root CA 사용
+    uploadClient.setTimeout(30000); // 30초 타임아웃 설정
     
-    Serial.print("`: ");
-    Serial.println(host);
+    Serial.printf("S3 서버 연결 중: %s\n", host.c_str());
 
     if (!uploadClient.connect(host.c_str(), 443)) {
-        Serial.println("호스트 연결 실패!");
+        Serial.println("❌ S3 서버 연결 실패!");
         return false;
     }
+    Serial.println("✅ S3 서버 연결 성공");
 
     // 3. HTTP PUT 요청 헤더 생성
     String requestHeader = "PUT " + path + " HTTP/1.1\r\n" +
@@ -295,17 +301,102 @@ static bool uploadImageToS3(camera_fb_t* fb, const String& url) {
                          "Content-Length: " + String(fb->len) + "\r\n" +
                          "Connection: close\r\n\r\n";
     
+    Serial.println("HTTP 헤더 전송 중...");
+    Serial.println(requestHeader);
+    
     // 4. 헤더와 이미지 데이터 전송
     uploadClient.print(requestHeader);
-    uploadClient.write(fb->buf, fb->len);
+    
+    Serial.println("이미지 데이터 청크 전송 시작...");
+    
+    // 큰 이미지를 청크 단위로 나누어 전송 (WiFi 버퍼 제한 해결)
+    const size_t CHUNK_SIZE = 8192; // 8KB 청크 크기
+    size_t totalSent = 0;
+    size_t remaining = fb->len;
+    uint8_t* dataPtr = fb->buf;
+    
+    while (remaining > 0) {
+        size_t chunkSize = (remaining > CHUNK_SIZE) ? CHUNK_SIZE : remaining;
+        
+        Serial.printf("청크 전송: %zu bytes (진행률: %.1f%%)\n", 
+                      chunkSize, (float)totalSent / fb->len * 100.0);
+        
+        size_t sent = uploadClient.write(dataPtr, chunkSize);
+        
+        if (sent != chunkSize) {
+            Serial.printf("❌ 청크 전송 실패: %zu / %zu bytes\n", sent, chunkSize);
+            uploadClient.stop();
+            return false;
+        }
+        
+        totalSent += sent;
+        remaining -= sent;
+        dataPtr += sent;
+        
+        // 청크 간 짧은 대기 (버퍼 안정화)
+        if (remaining > 0) {
+            delay(10);
+        }
+    }
+    
+    Serial.printf("✅ 전체 이미지 전송 완료: %zu / %zu bytes\n", totalSent, fb->len);
+    
+    // 5. 서버 응답 확인 (중요!)
+    Serial.println("서버 응답 대기 중...");
+    unsigned long responseTimeout = millis() + 10000; // 10초 대기
+    
+    while (uploadClient.connected() && !uploadClient.available()) {
+        if (millis() > responseTimeout) {
+            Serial.println("❌ 서버 응답 타임아웃!");
+            uploadClient.stop();
+            return false;
+        }
+        delay(10);
+    }
+    
+    // HTTP 응답 읽기
+    String response = "";
+    String statusLine = "";
+    bool isFirstLine = true;
+    
+    while (uploadClient.available()) {
+        String line = uploadClient.readStringUntil('\n');
+        if (isFirstLine) {
+            statusLine = line;
+            isFirstLine = false;
+            Serial.printf("HTTP 상태: %s\n", statusLine.c_str());
+        }
+        response += line + "\n";
+        
+        // 너무 많은 데이터 읽기 방지
+        if (response.length() > 2048) break;
+    }
+    
+    Serial.printf("서버 응답:\n%s\n", response.c_str());
+    
+    // HTTP 상태 코드 확인
+    bool uploadSuccess = false;
+    if (statusLine.indexOf("200") > 0 || statusLine.indexOf("201") > 0) {
+        uploadSuccess = true;
+        Serial.println("✅ S3 업로드 성공!");
+    } else {
+        Serial.println("❌ S3 업로드 실패!");
+        Serial.printf("상태 코드: %s\n", statusLine.c_str());
+        
+        // 일반적인 오류 코드 설명
+        if (statusLine.indexOf("403") > 0) {
+            Serial.println("원인: 권한 없음 (Presigned URL 만료 또는 잘못된 서명)");
+        } else if (statusLine.indexOf("404") > 0) {
+            Serial.println("원인: 버킷 또는 경로를 찾을 수 없음");
+        } else if (statusLine.indexOf("400") > 0) {
+            Serial.println("원인: 잘못된 요청 (헤더 또는 데이터 문제)");
+        }
+    }
     
     long duration = millis() - startTime;
-    Serial.printf("이미지 업로드 완료, 소요 시간: %ld ms.\n", duration);
-    
-    // (Optional) 서버 응답 확인 로직 추가 가능
-    // while(uploadClient.connected() && !uploadClient.available()) delay(10);
-    // while (uploadClient.available()) { Serial.write(uploadClient.read()); }
+    Serial.printf("업로드 처리 완료, 소요 시간: %ld ms, 성공: %s\n", 
+                  duration, uploadSuccess ? "예" : "아니오");
     
     uploadClient.stop();
-    return true;
+    return uploadSuccess;
 }

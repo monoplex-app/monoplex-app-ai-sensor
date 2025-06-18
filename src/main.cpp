@@ -115,11 +115,11 @@ void updateStatusLEDs() {
 void handleSensorDataPublishing() {
     static unsigned long lastSensorPublish = 0;
     static bool firstPublishDone = false;
-    const unsigned long sensorPublishInterval = 10000; // 10초마다 센서 데이터 발행
+    const unsigned long sensorPublishInterval = 1000; // 1초마다 센서 데이터 발행
     
     unsigned long currentTime = millis();
     
-    // MQTT 연결 후 첫 발행은 5초 후, 이후 10초마다 발행
+    // MQTT 연결 후 첫 발행은 5초 후, 이후 1초마다 발행
     bool shouldPublish = false;
     if (isMqttConnected) {
         if (!firstPublishDone && currentTime > 5000) {
