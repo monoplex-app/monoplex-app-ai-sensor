@@ -1,8 +1,7 @@
 #pragma once
 
-// 카메라 모델 선택 (하나만 활성화)
 #ifndef CAMERA_MODEL_ESP32S3_EYE
-#define CAMERA_MODEL_ESP32S3_EYE // 기본 설정
+#define CAMERA_MODEL_ESP32S3_EYE // 사용 중인 카메라 모델
 #endif
 
 #include <Arduino.h>
@@ -18,41 +17,18 @@
 // AWS IoT Core 설정
 const char AWS_IOT_ENDPOINT[] PROGMEM = "ac1scbno22vjk-ats.iot.ap-northeast-2.amazonaws.com";
 const char PROVISIONING_TEMPLATE_NAME[] PROGMEM = "MonoplexProvisioningTemplate";
-#define AWS_MQTT_PORT 8883
-
-// S3 업로드 기본 설정
-const char S3_DEFAULT_URL[] PROGMEM = "https://monoplex-esp32-image-test-bucket-2025-05-22.s3.amazonaws.com/images/test-image.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA57VDLR6OGZOOJLGP%2F20250609%2Fap-northeast-2%2Fs3%2Faws4_request&X-Amz-Date=20250609T070653Z&X-Amz-Expires=604800&X-Amz-SignedHeaders=content-type%3Bhost&X-Amz-Signature=9e01d860a645aa81bdbdecb718e2fc26365cb9e8cc21607d7e037221566729da";
-const char S3_DEFAULT_HOST[] PROGMEM = "monoplex-esp32-image-test-bucket-2025-05-22.s3.amazonaws.com";
-#define S3_UPLOAD_CHUNK_SIZE 16384
-
-// 조명 제어 설정
-#define LIGHT_PIN 19
-#define LIGHT_ON 1
-#define LIGHT_OFF 0
-#define LIGHT_NIGHT_THRESHOLD 10.0
-
-// 센서 데이터 발행 간격
-#define SENSOR_PUBLISH_INTERVAL_MS 5000
-
-// MQTT 연결 관리 설정
-#define MQTT_RETRY_INTERVAL_MS 20000        // MQTT 재연결 시도 간격
-#define MQTT_KEEPALIVE_INTERVAL_MS 25000    // MQTT heartbeat 간격
-#define MAX_MQTT_RECONNECT_ATTEMPTS 5       // MQTT 최대 재연결 시도 횟수
-
-// 카메라 설정
-#define CAMERA_CAPTURE_MAX_RETRIES 5        // 카메라 캡처 최대 재시도 횟수
 
 // NTP 설정
 const char NTP_SERVER[] PROGMEM = "pool.ntp.org";
 const long GMT_OFFSET_SEC = 9 * 3600;
 const int DAYLIGHT_OFFSET_SEC = 0;
 
-// 파일 경로
-const char LFS_ROOT_CA_PATH[] PROGMEM = "/root_ca.pem";
-const char LFS_CLAIM_CRT_PATH[] PROGMEM = "/claim.crt";
-const char LFS_CLAIM_KEY_PATH[] PROGMEM = "/claim.key";
-const char LFS_DEVICE_CRT_PATH[] PROGMEM = "/device.crt";
-const char LFS_DEVICE_KEY_PATH[] PROGMEM = "/device.key";
+// // 파일 경로
+// const char LFS_ROOT_CA_PATH[] PROGMEM = "/root_ca.pem";
+// const char LFS_CLAIM_CRT_PATH[] PROGMEM = "/claim.crt";
+// const char LFS_CLAIM_KEY_PATH[] PROGMEM = "/claim.key";
+// const char LFS_DEVICE_CRT_PATH[] PROGMEM = "/device.crt";
+// const char LFS_DEVICE_KEY_PATH[] PROGMEM = "/device.key";
 
 // MQTT 토픽
 const char CERTIFICATE_CREATE_TOPIC[] PROGMEM = "$aws/certificates/create/json";
@@ -84,14 +60,11 @@ inline const char *fpstr_to_cstr(const __FlashStringHelper *fpstr)
 }
 
 // LED 핀 (외주 코드 및 현재 프로젝트 필요에 따라 통합)
-#define LED_BLUE 2 // MQTT 연결 상태 표시
-#define LED_RED 20 // 카메라 상태 표시
+#define LED_BLUE 2 // 현재 프로젝트의 기존 핀과 충돌 여부 확인
+#define LED_RED 20 // 현재 프로젝트의 기존 핀과 충돌 여부 확인
 #define LED_ON 0
 #define LED_OFF 1
 
-// I2C 핀 (센서용)
+// I2C 핀 (센서용 - 외주 코드 기준)
 #define I2C_SDA_PIN 41
 #define I2C_SCL_PIN 42
-
-// BLE 디바이스 이름
-#define BLE_DEVICE_NAME "MONOPLEX_AI_SENSOR"

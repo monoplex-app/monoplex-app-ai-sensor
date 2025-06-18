@@ -1,255 +1,146 @@
-#include <Arduino.h>
 #include "config.h"
+#include "globals.h"
+#include "wifi_handler.h"
+#include "ble_handler.h"
+#include "mqtt_handler.h"
+#include "camera_handler.h"
+#include "sensor_handler.h"
+#include "eeprom_handler.h"
 
-// 모듈 헤더들
-#include "wifi_manager.h"
-#include "ble_provisioning.h"
-#include "device_identity.h"
-#include "lighting_controller.h"
-#include "sensor_manager.h"
-#include "camera_manager.h"
-#include "s3_manager.h"
-#include "mqtt_manager.h"
-#include "image_capture_handler.h"
+// 함수 선언
+// setup()과 loop()보다 앞에 이 함수들이 존재한다고 미리 알려줌
+void initPins();
+void updateStatusLEDs();
+void handleSensorDataPublishing();
 
-// ESP32 라이브러리
-#include <nvs_flash.h>
-#include <esp_wifi.h>
-#include <PubSubClient.h>
-#include <ArduinoJson.h>
-#include "esp_heap_caps.h"
+// === 전역 변수 정의 ===
+// globals.h에서 extern으로 선언된 변수들의 실제 정의 (메모리 할당)
+String deviceUid = "";                  // 장치 고유 식별자
+bool isWifiConnected = false;           // WiFi 연결 상태
+bool isMqttConnected = false;           // MQTT 연결 상태
+bool isBleClientConnected = false;      // BLE 클라이언트 연결 상태
 
-// 전역 객체
-WiFiClientSecure wifiClientSecure;
+// LED 상태 관리 변수
+unsigned long lastLedToggleTime = 0;    // 마지막 LED 토글 시간
+const long ledToggleInterval = 500;     // 0.5초 마다 토글
+bool ledState = false;                  // LED 상태
 
-// 시스템 상태 변수
-float ambient = 20.0;
-bool needCameraReinit = false;
+void setup() {
+    Serial.begin(SERIAL_BAUD_RATE);
 
-// 카메라 초기화 관련 변수
-static int cameraInitAttempts = 0;
-static unsigned long lastCameraInitAttempt = 0;
-static const int MAX_CAMERA_INIT_ATTEMPTS = 5;
-static const unsigned long CAMERA_INIT_RETRY_INTERVAL = 30000; // 30초 간격
+    // // 3초간 대기하여 모니터를 켤 시간을 줍니다.
+    // delay(3000);
+    // Serial.println("\nMONOPLEX AI SENSOR 시작");
 
-// MQTT 콜백 함수
-void mqtt_callback(char *topic, byte *payload, unsigned int length);
+    // EEPROM 초기화 및 저장된 설정 로드
+    initEEPROM();
+    deviceUid = getMacAddress(); // MAC 주소를 고유 식별자로 사용
+    loadWiFiCredentials(ssid, password);
 
-void mqtt_callback(char *topic, byte *payload, unsigned int length)
-{
-    Serial.println(F("--- MQTT Message Received ---"));
-    Serial.print(F("[MQTT] Raw Topic: "));
-    Serial.println(topic);
-    Serial.print(F("[MQTT] Payload: "));
-    for (unsigned int i = 0; i < length; i++) {
-        Serial.print((char)payload[i]);
+    // 하드웨어 초기화
+    initPins();
+    initSensors();
+    
+    Serial.println("카메라 초기화 호출 시작...");
+    bool cameraInitResult = initCamera();
+    Serial.printf("카메라 초기화 결과: %s\n", cameraInitResult ? "성공" : "실패");
+
+    // WiFi 스캔을 먼저 수행 (BLE에서 사용할 목록 준비)
+    Serial.println("주변 WiFi 네트워크 스캔 중...");
+    WiFi.mode(WIFI_STA);
+    delay(100);
+    String wifiListJson = scanWifiNetworks(deviceUid);
+    Serial.println("WiFi 스캔 완료, BLE 초기화 진행");
+    
+    // BLE 초기화 (스캔된 WiFi 목록을 사용)
+    initBLE(deviceUid, wifiListJson);
+    
+    // 연결 초기화
+    if (areWiFiCredentialsAvailable()) {
+        initWiFi();
     }
-    Serial.println();
-    Serial.println(F("-----------------------------"));
-
-    String deviceId = DeviceIdentity::getDeviceId();
-    String captureTopic = "devices/" + deviceId + "/image/capture";
-
-    if (String(topic).equals(captureTopic)) {
-        Serial.println(F("[MQTT] Image capture command received!"));
-
-        String message = String((char *)payload).substring(0, length);
-        JsonDocument jsonDoc;
-        DeserializationError error = deserializeJson(jsonDoc, message);
-
-        if (!error && jsonDoc["url"].is<const char *>()) {
-            const char* newUrl = jsonDoc["url"].as<const char*>();
-            Serial.print(F("[MQTT] New S3 URL received: "));
-            Serial.println(newUrl);
-            
-            // 새 URL로 이미지 캡처 실행
-            image_capture_handler_process_with_url(newUrl);
-        } else {
-            Serial.println(F("[MQTT] No valid 'url' in payload. Using default."));
-            
-            // 기본 URL로 이미지 캡처 실행
-            image_capture_handler_process();
-        }
-    } else {
-        Serial.println(F("[MQTT] Received message on an unhandled topic."));
-    }
+    
+    // MQTT 초기화 (WiFi 초기화 후)
+    initMQTT();
+    
+    Serial.println("설정 완료. 메인 루프 진입");
 }
 
-void setup()
-{
-    Serial.begin(115200);
-    delay(2000);
-    Serial.println(F("\n[SETUP] 시스템 부팅 중..."));
+void loop() {
+    // WiFi 및 MQTT 연결 로직 처리
+    handleWiFiConnection();
+    if (isWifiConnected) {
+        handleMqttConnection();
+        mqttLoop(); // MQTT 메시지 수신/처리
+    }
 
-    // LED 초기화
-    Serial.println(F("[SETUP] LED 초기화 중..."));
+    // 수신된 BLE 통신 처리
+    handleBLE();
+
+    // LED 상태 업데이트
+    updateStatusLEDs();
+
+    // 주기적인 센서 읽기 및 MQTT 발행
+    handleSensorDataPublishing();
+}
+
+void initPins() {
     pinMode(LED_BLUE, OUTPUT);
     pinMode(LED_RED, OUTPUT);
+    pinMode(LIGHT, OUTPUT);
+
     digitalWrite(LED_BLUE, LED_OFF);
-    digitalWrite(LED_RED, LED_ON);
-    Serial.println(F("[SETUP] LED 초기화 완료."));
-
-    // NVS 초기화
-    Serial.println(F("[SETUP] NVS 초기화 중..."));
-    esp_err_t err_nvs = nvs_flash_init();
-    if (err_nvs == ESP_ERR_NVS_NO_FREE_PAGES || err_nvs == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        Serial.println(F("[SETUP] NVS 파티션 지우는 중..."));
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        err_nvs = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(err_nvs);
-    Serial.println(F("[SETUP] NVS 초기화 완료"));
-
-    // 디바이스 ID 초기화
-    DeviceIdentity::init();
-    Serial.print(F("[SETUP] 디바이스 ID: "));
-    Serial.println(DeviceIdentity::getDeviceId());
-
-    // WiFi 드라이버 리셋
-    esp_wifi_stop();
-    esp_wifi_deinit();
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    esp_wifi_init(&cfg);
-    esp_wifi_set_mode(WIFI_MODE_STA);
-    esp_wifi_start();
-    delay(1000);
-
-    // 모든 모듈 초기화
-    Serial.println(F("[SETUP] 모듈 초기화 시작..."));
-    
-    // WiFi 초기화
-    wifiManager.init(&wifiClientSecure);
-    
-    // BLE 서비스 초기화
-    bleProvisioning.init(BLE_DEVICE_NAME);
-    bleProvisioning.start();
-    
-    // 조명 제어 모듈 초기화
-    lighting_controller_init(LIGHT_PIN, LIGHT_NIGHT_THRESHOLD);
-    
-    // 센서 관리 모듈 초기화
-    sensor_manager_init(I2C_SDA_PIN, I2C_SCL_PIN);
-    
-    // S3 관리 모듈 초기화
-    s3_manager_init();
-    
-    // MQTT 관리 모듈 초기화
-    mqtt_manager_init(wifiClientSecure, mqtt_callback);
-    
-    // 이미지 캡처 핸들러 초기화
-    image_capture_handler_init();
-
-    Serial.println(F("[SETUP] 모든 초기화 단계 완료."));
-    Serial.printf("[MEM] Free DRAM heap: %d bytes\n", heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+    digitalWrite(LED_RED, LED_ON); // 부팅 시 빨간색 LED 켜기
+    digitalWrite(LIGHT, LIGHT_OFF);
 }
 
-void loop()
-{
-    // WiFi 관리
-    wifiManager.update();
+void updateStatusLEDs() {
+    unsigned long currentTime = millis();
+    if (currentTime - lastLedToggleTime >= ledToggleInterval) {
+        lastLedToggleTime = currentTime;
+        ledState = !ledState;
 
-    // WiFi 연결 상태에 따른 MQTT 관리
-    if (wifiManager.isConnected()) {
-        // MQTT 연결 유지 및 관리
-        if (!mqtt_manager_maintain_connection()) {
-            // MQTT 연결이 끊어졌거나 문제가 있을 때만 재연결 시도
-            mqtt_manager_connect();
-        }
-    } else {
-        // WiFi 연결이 끊어진 경우
-        if (mqtt_manager_is_connected()) {
-            Serial.println(F("[WIFI] WiFi 연결 끊어짐, MQTT 상태 리셋"));
-            digitalWrite(LED_BLUE, LED_OFF);
-        }
-    }
-
-    // BLE로 WiFi 정보가 바뀌었거나, WiFi/MQTT 재연결 성공 시 카메라 재초기화
-    if (needCameraReinit && wifiManager.isConnected() && mqtt_manager_is_connected()) {
-        Serial.println(F("[MAIN] BLE WiFi 변경으로 인한 카메라 재초기화 시도..."));
-        camera_manager_reinit_with_ble_safety();
-        if (camera_manager_is_initialized()) {
-            digitalWrite(LED_RED, LED_OFF);
-            cameraInitAttempts = 0; // 재초기화 성공 시 카운터 리셋
-            Serial.println(F("[MAIN] 카메라 재초기화 성공."));
+        // 빨간색 LED: WiFi 연결 시 깜빡임, 연결 안되면 켜짐
+        if (isWifiConnected) {
+            digitalWrite(LED_RED, ledState ? LED_ON : LED_OFF);
         } else {
-            Serial.println(F("[MAIN] 카메라 재초기화 실패. 일반 초기화 로직에서 재시도됩니다."));
+            digitalWrite(LED_RED, LED_ON);
         }
-        needCameraReinit = false;
-    }
 
-    // WiFi 재연결 처리
-    if (wifiManager.isPendingPostConnectionSetup() && wifiManager.isConnected()) {
-        mqtt_manager_disconnect();
-        wifiManager.handlePostConnectionSetup();
-        if (wifiManager.isConnected()) {
-            Serial.println(F("[MAIN] WiFi re-established or setup complete."));
-            delay(1000);
+        // 파란색 LED: BLE 클라이언트 연결 시 켜짐, 연결 안되면 꺼짐
+        digitalWrite(LED_BLUE, isBleClientConnected ? LED_ON : LED_OFF);
+    }
+}
+
+void handleSensorDataPublishing() {
+    static unsigned long lastSensorPublish = 0;
+    static bool firstPublishDone = false;
+    const unsigned long sensorPublishInterval = 1000; // 1초마다 센서 데이터 발행
+    
+    unsigned long currentTime = millis();
+    
+    // MQTT 연결 후 첫 발행은 5초 후, 이후 1초마다 발행
+    bool shouldPublish = false;
+    if (isMqttConnected) {
+        if (!firstPublishDone && currentTime > 5000) {
+            shouldPublish = true;
+            firstPublishDone = true;
+        } else if (firstPublishDone && (currentTime - lastSensorPublish >= sensorPublishInterval)) {
+            shouldPublish = true;
         }
-        mqtt_manager_connect();
     }
-
-    // 카메라 초기화 (MQTT 연결 후) - 재시도 제한 적용
-    if (wifiManager.isConnected() && mqtt_manager_is_connected() && 
-        !camera_manager_is_initialized() && 
-        cameraInitAttempts < MAX_CAMERA_INIT_ATTEMPTS) {
+    
+    if (shouldPublish) {
+        lastSensorPublish = currentTime;
         
-        unsigned long currentTime = millis();
+        // 센서 데이터 읽기
+        readAllSensors();
         
-        // 첫 시도이거나 재시도 간격이 지났을 때만 시도
-        if (cameraInitAttempts == 0 || (currentTime - lastCameraInitAttempt > CAMERA_INIT_RETRY_INTERVAL)) {
-            lastCameraInitAttempt = currentTime;
-            cameraInitAttempts++;
-            
-            Serial.printf("[MAIN] 카메라 초기화 시도 %d/%d...\n", cameraInitAttempts, MAX_CAMERA_INIT_ATTEMPTS);
-            
-            if (camera_manager_init()) {
-                Serial.println(F("[MAIN] 카메라 시스템 초기화 성공."));
-                digitalWrite(LED_RED, LED_OFF);
-                cameraInitAttempts = 0; // 성공 시 카운터 리셋
-            } else {
-                Serial.printf("[MAIN] 카메라 초기화 실패 (%d/%d).\n", cameraInitAttempts, MAX_CAMERA_INIT_ATTEMPTS);
-                
-                if (cameraInitAttempts >= MAX_CAMERA_INIT_ATTEMPTS) {
-                    Serial.println(F("[MAIN] 카메라 초기화 최대 시도 횟수 도달. 카메라 없이 계속 동작합니다."));
-                    Serial.println(F("[MAIN] 시스템은 센서 데이터 수집과 MQTT 통신을 계속 수행합니다."));
-                }
-            }
-        }
-    }
-
-    // 주기적인 센서 값 읽기 및 MQTT 발행
-    static unsigned long lastSensorReadTime = 0;
-    if (millis() - lastSensorReadTime > SENSOR_PUBLISH_INTERVAL_MS) {
-        lastSensorReadTime = millis();
+        // JSON 형태로 센서 데이터 생성
+        String sensorJson = getSensorDataJson();
         
-        if (wifiManager.isConnected() && mqtt_manager_is_connected()) {
-            // 센서 데이터 읽기 및 MQTT 발행
-            JsonDocument jsonDoc;
-            if (sensor_manager_get_data_json(jsonDoc)) {
-                // 전역 ambient 변수 업데이트 (조명 제어용)
-                if (jsonDoc["ambientLight"].is<float>()) {
-                    ambient = jsonDoc["ambientLight"];
-                }
-                
-                mqtt_manager_publish_sensor_data(jsonDoc);
-            }
-        } else {
-            // MQTT 미연결 시 로컬에만 출력
-            JsonDocument localDoc;
-            if (sensor_manager_get_data_json(localDoc)) {
-                char localBuffer[256];
-                serializeJson(localDoc, localBuffer);
-                Serial.printf("[SENSOR_LOCAL] %s\n", localBuffer);
-                
-                // 전역 ambient 변수 업데이트
-                if (localDoc["ambientLight"].is<float>()) {
-                    ambient = localDoc["ambientLight"];
-                }
-            } else {
-                Serial.println(F("[SENSOR_LOCAL] 센서 데이터 읽기 실패"));
-            }
-        }
+        // MQTT로 센서 데이터 발행
+        String sensorTopic = deviceUid + "/sensor";
+        publishMqttMessage(sensorTopic, sensorJson);
     }
-
-    delay(100); // 루프 지연 시간
 }
