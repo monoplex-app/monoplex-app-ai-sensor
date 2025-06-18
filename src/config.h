@@ -1,4 +1,6 @@
-#pragma once
+// 헤더 파일 보호
+#ifndef CONFIG_H
+#define CONFIG_H
 
 #ifndef CAMERA_MODEL_ESP32S3_EYE
 #define CAMERA_MODEL_ESP32S3_EYE // 사용 중인 카메라 모델
