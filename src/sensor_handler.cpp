@@ -26,6 +26,7 @@ bool initSensors() {
     // VCNL4040 설정
     vcnl.setProximityLEDCurrent(VCNL4040_LED_CURRENT_200MA);
     vcnl.setProximityIntegrationTime(VCNL4040_PROXIMITY_INTEGRATION_TIME_8T);
+    vcnl.setProximityLEDDutyCycle(VCNL4040_LED_DUTY_1_40);
     vcnl.setAmbientIntegrationTime(VCNL4040_AMBIENT_INTEGRATION_TIME_80MS);
     
     // 3. BMI270 (IMU) 센서 초기화
