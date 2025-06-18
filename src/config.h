@@ -1,4 +1,4 @@
-// include guard
+// 헤더 파일 보호
 #ifndef CONFIG_H
 #define CONFIG_H
 
