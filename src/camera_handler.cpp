@@ -65,9 +65,9 @@ bool initCamera() {
         Serial.println("PSRAM 감지됨 - 카메라 촬영 실패 방지 모드로 설정");
         
         // ========= 카메라 촬영 실패 방지 설정 =========
-        config.frame_size = FRAMESIZE_UXGA;   // 해상도를 640x480으로 더 낮춤 (안정성 우선)
+        config.frame_size = FRAMESIZE_UXGA;
         config.jpeg_quality = 20;            // JPEG 품질을 더 낮춤 (처리 부하 감소)
-        config.fb_count = 2;                 // 더블 버퍼링 유지
+        config.fb_count = 1;                 // 단일 버퍼로 변경 (이전 이미지 문제 방지)
         config.grab_mode = CAMERA_GRAB_WHEN_EMPTY; // 더 안전한 그랩 모드
         config.fb_location = CAMERA_FB_IN_PSRAM;
         // ============================================
@@ -170,16 +170,41 @@ bool initCamera() {
 }
 
 void triggerCameraCapture(const String& uploadUrl) {
-    Serial.println("이미지 촬영 및 업로드 시작 (단순 캡처 방식)");
+    Serial.println("이미지 촬영 및 업로드 시작 (강화된 버퍼 플러시 방식)");
 
-    // 카메라 프레임 버퍼 캡처 시도 (안정성 강화)
-    Serial.println("카메라 촬영 시작...");
-    delay(100); // 조명 안정화 후 촬영
+    // 1단계: 강화된 버퍼 플러시 - 모든 이전 버퍼 완전 제거
+    Serial.println("카메라 버퍼 완전 플러시 중...");
+    for (int i = 0; i < 3; i++) {
+        camera_fb_t * dummy_fb = esp_camera_fb_get();
+        if (dummy_fb) {
+            Serial.printf("이전 버퍼 %d 제거 완료\n", i + 1);
+            esp_camera_fb_return(dummy_fb);
+            delay(50); // 버퍼 간 대기
+        }
+    }
     
+    // 2단계: 카메라 센서 강제 리프레시
+    Serial.println("카메라 센서 설정 리프레시...");
+    sensor_t * s = esp_camera_sensor_get();
+    if (s) {
+        // 센서 설정을 약간 변경했다가 다시 원래대로 (캐시 무효화)
+        s->set_brightness(s, 2);
+        delay(100);
+        s->set_brightness(s, 1);
+        delay(100);
+    }
+    
+    // 3단계: 카메라 센서 충분한 안정화 대기
+    Serial.println("카메라 센서 안정화 대기...");
+    delay(500); // 더 긴 대기 시간으로 새로운 이미지 보장
+    
+    // 4단계: 실제 촬영 수행
+    Serial.println("실제 카메라 촬영 시작...");
     camera_fb_t * fb = esp_camera_fb_get();
     
     if (fb) {
-        Serial.println("✅ 카메라 촬영 성공!");
+        Serial.println("✅ 새로운 이미지 촬영 성공!");
+        Serial.printf("촬영 시각: %lu ms\n", millis());
     }
     
     if (!fb) {
@@ -222,7 +247,28 @@ void testCameraCapture() {
     Serial.printf("  힙 메모리: %d bytes\n", ESP.getFreeHeap());
     Serial.printf("  PSRAM: %d bytes\n", ESP.getFreePsram());
     
-    // 테스트 촬영 시도
+    // 테스트 촬영 시도 (강화된 버퍼 플러시 방식)
+    Serial.println("이전 버퍼 완전 플러시 중...");
+    for (int i = 0; i < 3; i++) {
+        camera_fb_t * dummy_fb = esp_camera_fb_get();
+        if (dummy_fb) {
+            Serial.printf("이전 버퍼 %d 제거 완료\n", i + 1);
+            esp_camera_fb_return(dummy_fb);
+            delay(50);
+        }
+    }
+    
+    Serial.println("센서 설정 리프레시...");
+    if (s) {
+        s->set_brightness(s, 2);
+        delay(100);
+        s->set_brightness(s, 1);
+        delay(100);
+    }
+    
+    Serial.println("센서 안정화 대기...");
+    delay(500);
+    
     Serial.println("테스트 촬영 시도 중...");
     camera_fb_t * fb = esp_camera_fb_get();
     
@@ -239,7 +285,23 @@ void testCameraCapture() {
         s->set_framesize(s, FRAMESIZE_VGA); // 더 작은 크기로 시도
         delay(100);
         
-        // 재시도
+        // 재시도 (강화된 버퍼 플러시 포함)
+        Serial.println("재시도 전 버퍼 완전 플러시...");
+        for (int i = 0; i < 3; i++) {
+            camera_fb_t * retry_dummy_fb = esp_camera_fb_get();
+            if (retry_dummy_fb) {
+                Serial.printf("재시도 버퍼 %d 제거\n", i + 1);
+                esp_camera_fb_return(retry_dummy_fb);
+                delay(50);
+            }
+        }
+        
+        // 센서 리프레시
+        s->set_brightness(s, 2);
+        delay(100);
+        s->set_brightness(s, 1);
+        delay(200);
+        
         fb = esp_camera_fb_get();
         if (!fb) {
             Serial.println("재시도 촬영도 실패");
