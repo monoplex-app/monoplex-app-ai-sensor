@@ -7,6 +7,7 @@
 // 이 모듈에 필요한 다른 핸들러 포함
 #include "wifi_handler.h"
 #include "camera_handler.h" // MQTT 메시지로 카메라 촬영을 제어하기 위해 필요
+#include "ble_handler.h"
 
 // 모듈 내부에서만 사용할 객체 및 변수
 static WiFiClientSecure wifiNet;
@@ -50,7 +51,7 @@ void initMQTT() {
     mqttClient.setCallback(mqttCallback);
     mqttClient.setKeepAlive(30);
     mqttClient.setSocketTimeout(10);
-    mqttClient.setBufferSize(1024);
+    mqttClient.setBufferSize(2048);
     
     Serial.println("MQTT 핸들러 초기화 완료");
 }
@@ -74,6 +75,7 @@ void handleMqttConnection() {
             Serial.println("MQTT 연결 복구됨");
             isMqttConnected = true;
             subscribeToTopics();
+            sendMqttStatusUpdate(true);
         }
         return;
     }
@@ -94,10 +96,12 @@ void handleMqttConnection() {
             Serial.println("MQTT 연결 성공");
             isMqttConnected = true;
             subscribeToTopics();
+            sendMqttStatusUpdate(true);
         } else {
             int errorCode = mqttClient.state();
             Serial.print("MQTT 연결 실패, 에러 코드: ");
             Serial.println(errorCode);
+            sendMqttStatusUpdate(false, "mqtt_error_" + String(errorCode));
         }
     }
 }
@@ -121,6 +125,7 @@ void disconnectMQTT() {
         Serial.println("명령에 따라 MQTT 연결을 종료합니다.");
         mqttClient.disconnect();
         isMqttConnected = false;
+        sendMqttStatusUpdate(false, "mqtt_disconnected");
     }
 }
 
@@ -142,7 +147,7 @@ static void subscribeToTopics() {
 static void mqttCallback(char* topic, byte* payload, unsigned int length) {
     // 수신된 토픽이 "capture" 명령 토픽이라면
     if (String(topic) == subTopic) {
-        StaticJsonDocument<1024> doc;
+        JsonDocument doc;
         DeserializationError error = deserializeJson(doc, payload, length);
 
         if (error) {
@@ -151,7 +156,7 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
             return;
         }
 
-        if (doc.containsKey("url")) {
+        if (doc["url"].is<JsonVariant>()) {
             const char* url = doc["url"];
             Serial.println("카메라 촬영 명령 수신");
             triggerCameraCapture(String(url)); 

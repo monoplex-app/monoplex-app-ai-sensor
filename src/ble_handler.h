@@ -28,4 +28,18 @@ void handleBLE();
  */
 void sendBleData(const String& data);
 
+/**
+ * @brief Wi-Fi 연결 시도 결과를 BLE 클라이언트에 통지합니다.
+ * @param success true면 연결 성공, false면 실패
+ * @param message 추가 메시지(선택 사항)
+ */
+void sendWifiStatusUpdate(bool success, const String& message = "");
+
+/**
+ * @brief MQTT 연결 상태를 BLE 클라이언트에 통지합니다.
+ * @param success true면 연결 성공, false면 실패
+ * @param message 추가 메시지(선택 사항)
+ */
+void sendMqttStatusUpdate(bool success, const String& message = "");
+
 #endif // BLE_HANDLER_H

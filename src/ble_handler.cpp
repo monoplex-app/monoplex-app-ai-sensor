@@ -14,6 +14,7 @@ static String apListJson = ""; // 스캔된 WiFi AP 목록을 저장할 변수
 static bool requestFirstMsgSend = false;
 static int bleRetryCounter = 0;
 static bool rebootRequested = false;
+static bool awaitingMqttResult = false;
 
 // isBleClientConnected는 main.cpp에서 이미 정의됨 - 중복 정의 제거
 
@@ -169,7 +170,7 @@ void sendBleData(const String& data) {
 
 // 수신된 BLE 데이터를 파싱하고 처리하는 내부 함수
 void processBleData(const String& data) {
-    StaticJsonDocument<256> doc;
+    JsonDocument doc;
     DeserializationError error = deserializeJson(doc, data);
 
     if (error) {
@@ -187,14 +188,14 @@ void processBleData(const String& data) {
     }
 
     // 클라이언트가 Wi-Fi 목록을 요청하는 경우 추가
-    if (doc.containsKey("request_wifi_list")) {
+    if (doc["request_wifi_list"].is<JsonVariant>()) {
         Serial.println("Wi-Fi 목록 재요청 받음");
         sendBleData(apListJson);
         return;
     }
 
     // 클라이언트가 AP 목록을 잘 받았다는 응답 처리
-    if (doc.containsKey("received_ap_list")) {
+    if (doc["received_ap_list"].is<JsonVariant>()) {
         if (doc["received_ap_list"] == 1) {
             Serial.println("클라이언트가 AP 목록을 잘 받았다는 응답");
             bleRetryCounter = 0;
@@ -207,7 +208,7 @@ void processBleData(const String& data) {
         }
     }
     // 클라이언트가 선택한 SSID와 비밀번호 처리
-    else if (doc.containsKey("ssid")) {
+    else if (doc["ssid"].is<JsonVariant>()) {
         String new_ssid = doc["ssid"];
         String new_password = doc["passwd"];
 
@@ -220,9 +221,61 @@ void processBleData(const String& data) {
         // 새 정보를 EEPROM에 저장
         saveWiFiCredentials(new_ssid, new_password);
 
-        // 응답 전송 및 재부팅 요청
+        // 전역 ssid/password 갱신 후 즉시 Wi‑Fi 재연결 시도
+        ssid = new_ssid;
+        password = new_password;
+        awaitingMqttResult = false;
+        reconnectWiFi();
+
+        // 응답 전송
         sendBleData("{\"status\":\"credentials_received\"}");
-        rebootRequested = true;
-        Serial.println("자격 증명 저장. 연결 끊어지면 재부팅 요청.");
+        Serial.println("자격 증명 저장 및 즉시 WiFi 재연결 시도 완료.");
     }
+}
+
+void sendWifiStatusUpdate(bool success, const String& message) {
+    if (!isBleClientConnected) {
+        return;
+    }
+
+    JsonDocument doc;
+    doc["event"] = "wifi";
+    doc["status"] = success ? "connected" : "failed";
+    if (message.length() > 0) {
+        doc["message"] = message;
+    }
+
+    if (success) {
+        awaitingMqttResult = true;
+    } else {
+        awaitingMqttResult = false;
+    }
+
+    String payload;
+    serializeJson(doc, payload);
+    sendBleData(payload);
+}
+
+void sendMqttStatusUpdate(bool success, const String& message) {
+    if (!isBleClientConnected) {
+        return;
+    }
+
+    if (!awaitingMqttResult && !success) {
+        // 프로비저닝 흐름 중이 아닐 때의 실패 메시지는 무시
+        return;
+    }
+
+    JsonDocument doc;
+    doc["event"] = "mqtt";
+    doc["status"] = success ? "connected" : "failed";
+    if (message.length() > 0) {
+        doc["message"] = message;
+    }
+
+    awaitingMqttResult = false;
+
+    String payload;
+    serializeJson(doc, payload);
+    sendBleData(payload);
 }

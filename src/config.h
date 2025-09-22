@@ -6,7 +6,6 @@
 #define SERIAL_BAUD_RATE 115200
 
 // 핀 정의
-#define LED_BLUE 2
 #define LED_RED 20
 #define LED_ON 0
 #define LED_OFF 1
@@ -47,12 +46,12 @@ extern const char* CERTIFICATE_PEM;
 extern const char* PRIVATE_KEY;
 
 // EEPROM 설정
-#define EEPROM_SIZE 128
+#define EEPROM_SIZE 96              // 128에서 96으로 축소 (UID 저장 공간 제거)
 #define EEPROM_INIT_FLAG_ADDR 0
 #define EEPROM_AP_INFO_FLAG_ADDR 1
 #define EEPROM_SSID_ADDR 32
 #define EEPROM_PASSWD_ADDR 64
-#define EEPROM_UID_ADDR 96
+// #define EEPROM_UID_ADDR 96       // 미사용으로 제거
 #define EEPROM_INIT_CHECK_VALUE 0xA8
 
 #endif // CONFIG_H

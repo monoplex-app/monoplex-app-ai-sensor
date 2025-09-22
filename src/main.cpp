@@ -25,6 +25,19 @@ unsigned long lastLedToggleTime = 0;    // 마지막 LED 토글 시간
 const long ledToggleInterval = 500;     // 0.5초 마다 토글
 bool ledState = false;                  // LED 상태
 
+enum class LedPattern { solidOn, solidOff, slowBlink, fastBlink, doubleBlink };
+
+static LedPattern currentLedPattern = LedPattern::solidOn;
+static uint8_t ledPatternStep = 0;
+static bool ledOutputState = false;
+
+static void setStatusLed(bool on) {
+    if (ledOutputState != on) {
+        digitalWrite(LED_RED, on ? LED_ON : LED_OFF);
+        ledOutputState = on;
+    }
+}
+
 void setup() {
     Serial.begin(SERIAL_BAUD_RATE);
 
@@ -85,30 +98,85 @@ void loop() {
 }
 
 void initPins() {
-    pinMode(LED_BLUE, OUTPUT);
     pinMode(LED_RED, OUTPUT);
     pinMode(LIGHT, OUTPUT);
 
-    digitalWrite(LED_BLUE, LED_OFF);
-    digitalWrite(LED_RED, LED_ON); // 부팅 시 빨간색 LED 켜기
+    setStatusLed(true); // 부팅 시 LED 켬
+    currentLedPattern = LedPattern::solidOn;
+    ledPatternStep = 0;
+    ledState = false;
+    lastLedToggleTime = millis();
     digitalWrite(LIGHT, LIGHT_OFF);
 }
 
 void updateStatusLEDs() {
     unsigned long currentTime = millis();
-    if (currentTime - lastLedToggleTime >= ledToggleInterval) {
+
+    LedPattern desiredPattern;
+    if (!isWifiConnected) {
+        desiredPattern = isBleClientConnected ? LedPattern::fastBlink : LedPattern::slowBlink;
+    } else if (!isMqttConnected) {
+        desiredPattern = LedPattern::doubleBlink;
+    } else {
+        desiredPattern = LedPattern::solidOn;
+    }
+
+    if (desiredPattern != currentLedPattern) {
+        currentLedPattern = desiredPattern;
+        ledPatternStep = 0;
+        ledState = false;
         lastLedToggleTime = currentTime;
-        ledState = !ledState;
 
-        // 빨간색 LED: WiFi 연결 시 깜빡임, 연결 안되면 켜짐
-        if (isWifiConnected) {
-            digitalWrite(LED_RED, ledState ? LED_ON : LED_OFF);
-        } else {
-            digitalWrite(LED_RED, LED_ON);
+        switch (currentLedPattern) {
+            case LedPattern::solidOn:
+                setStatusLed(true);
+                break;
+            case LedPattern::solidOff:
+                setStatusLed(false);
+                break;
+            case LedPattern::slowBlink:
+            case LedPattern::fastBlink:
+                setStatusLed(false);
+                break;
+            case LedPattern::doubleBlink:
+                setStatusLed(true);
+                break;
         }
+    }
 
-        // 파란색 LED: BLE 클라이언트 연결 시 켜짐, 연결 안되면 꺼짐
-        digitalWrite(LED_BLUE, isBleClientConnected ? LED_ON : LED_OFF);
+    switch (currentLedPattern) {
+        case LedPattern::solidOn:
+            setStatusLed(true);
+            break;
+        case LedPattern::solidOff:
+            setStatusLed(false);
+            break;
+        case LedPattern::slowBlink:
+            if (currentTime - lastLedToggleTime >= static_cast<unsigned long>(ledToggleInterval)) {
+                lastLedToggleTime = currentTime;
+                ledState = !ledState;
+                setStatusLed(ledState);
+            }
+            break;
+        case LedPattern::fastBlink: {
+            const unsigned long fastBlinkInterval = 150;
+            if (currentTime - lastLedToggleTime >= fastBlinkInterval) {
+                lastLedToggleTime = currentTime;
+                ledState = !ledState;
+                setStatusLed(ledState);
+            }
+            break;
+        }
+        case LedPattern::doubleBlink: {
+            const unsigned long doubleBlinkIntervals[] = {120, 120, 120, 640};
+            const bool doubleBlinkStates[] = {true, false, true, false};
+            if (currentTime - lastLedToggleTime >= doubleBlinkIntervals[ledPatternStep]) {
+                lastLedToggleTime = currentTime;
+                ledPatternStep = (ledPatternStep + 1) % 4;
+                setStatusLed(doubleBlinkStates[ledPatternStep]);
+            }
+            break;
+        }
     }
 }
 
@@ -118,6 +186,16 @@ void handleSensorDataPublishing() {
     const unsigned long sensorPublishInterval = 1000; // 1초마다 센서 데이터 발행
     
     unsigned long currentTime = millis();
+    
+    // // 로컬 콘솔 로깅: MQTT 연결 여부와 관계없이 1초마다 근접센서 값을 출력
+    // static unsigned long lastLocalLog = 0;
+    // if (currentTime - lastLocalLog >= 1000) {
+    //     lastLocalLog = currentTime;
+    //     // 센서 값 갱신 후 근접센서 값 출력
+    //     readAllSensors();
+    //     SensorData latest = getSensorDataStruct();
+    //     Serial.printf("Proximity: %u\n", latest.proximity);
+    // }
     
     // MQTT 연결 후 첫 발행은 5초 후, 이후 1초마다 발행
     bool shouldPublish = false;

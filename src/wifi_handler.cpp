@@ -1,5 +1,6 @@
 #include "wifi_handler.h"
 #include "esp_system.h"
+#include "ble_handler.h"
 
 // --- 전역 변수 정의 ---
 // 헤더에서 extern으로 선언된 변수들의 실체를 여기서 정의
@@ -7,9 +8,20 @@ String ssid = "";
 String password = "";
 // isWifiConnected는 main.cpp에서 이미 정의됨 - 중복 정의 제거
 
+static bool awaitingWifiProvisioning = false;
+static bool suppressAutoReconnect = false;
+static unsigned long provisioningStartMs = 0;
+static int wifiRetryCount = 0;
+static const int MAX_WIFI_RETRY = 3;
+
+// WiFi 연결 결과를 기다리는 시간 제한 (밀리초)
+static const unsigned long WIFI_PROVISIONING_TIMEOUT_MS = 30000; // 30초로 증가
+
 void initWiFi() {
     // WiFi 모드 설정 및 초기화
     WiFi.mode(WIFI_STA);
+    WiFi.persistent(true);
+    WiFi.setAutoReconnect(true);
     delay(100); // 초기화 시간 확보
     
     if (!areWiFiCredentialsAvailable()) {
@@ -34,6 +46,11 @@ void handleWiFiConnection() {
             Serial.println("\nWiFi 연결 성공!");
             Serial.print("IP 주소: ");
             Serial.println(WiFi.localIP());
+            if (awaitingWifiProvisioning) {
+                sendWifiStatusUpdate(true);
+                awaitingWifiProvisioning = false;
+                wifiRetryCount = 0; // 성공 시 재시도 카운터 리셋
+            }
         }
     } else {
         // 이전에 연결된 상태였다면 (즉, 방금 연결이 끊어졌다면)
@@ -41,8 +58,97 @@ void handleWiFiConnection() {
             isWifiConnected = false;
             Serial.println("\nWiFi 연결 끊김.");
             Serial.println("재연결 시도...");
+            if (!suppressAutoReconnect) {
+                WiFi.begin(ssid.c_str(), password.c_str());
+            }
+        }
+
+        // 초기 부팅 등 아직 한 번도 연결되지 않았을 때도 주기적으로 재시도
+        static unsigned long lastRetryAttemptMs = 0;
+        const unsigned long retryIntervalMs = 5000; // 5초 주기 재시도
+        unsigned long nowMs = millis();
+        if (awaitingWifiProvisioning && !suppressAutoReconnect &&
+            nowMs - lastRetryAttemptMs >= retryIntervalMs) {
+            lastRetryAttemptMs = nowMs;
+            Serial.print("WiFi 미연결 상태, 재연결 시도: ");
+            Serial.println(ssid);
+            // 강제 재시도 (세션 유지)
+            WiFi.disconnect(false);
+            delay(100);
             WiFi.begin(ssid.c_str(), password.c_str());
         }
+
+        if (awaitingWifiProvisioning) {
+            wl_status_t status = WiFi.status();
+            bool timedOut = (nowMs - provisioningStartMs) > WIFI_PROVISIONING_TIMEOUT_MS;
+
+            if (status == WL_CONNECT_FAILED) {
+                wifiRetryCount++;
+                if (wifiRetryCount >= MAX_WIFI_RETRY) {
+                    Serial.printf("WiFi 연결 실패: %d회 재시도 후 포기 (비밀번호 오류 가능성)\n", MAX_WIFI_RETRY);
+                    sendWifiStatusUpdate(false, "wifi_password_incorrect");
+                    awaitingWifiProvisioning = false;
+                    suppressAutoReconnect = true;
+                    wifiRetryCount = 0;
+                    WiFi.disconnect(true);
+                    WiFi.setAutoReconnect(false);
+                } else {
+                    Serial.printf("WiFi 연결 실패, 재시도 %d/%d\n", wifiRetryCount, MAX_WIFI_RETRY);
+                    WiFi.disconnect(false);
+                    delay(2000);
+                    WiFi.begin(ssid.c_str(), password.c_str());
+                    provisioningStartMs = millis(); // 타이머 리셋
+                }
+            } else if (status == WL_NO_SSID_AVAIL) {
+                Serial.println("WiFi 연결 실패: SSID를 찾을 수 없음");
+                sendWifiStatusUpdate(false, "wifi_ssid_not_found");
+                awaitingWifiProvisioning = false;
+                suppressAutoReconnect = true;
+                WiFi.disconnect(true);
+                WiFi.setAutoReconnect(false);
+            } else if (timedOut) {
+                wifiRetryCount++;
+                if (wifiRetryCount >= MAX_WIFI_RETRY) {
+                    Serial.printf("WiFi 연결 실패: %d회 재시도 후 타임아웃\n", MAX_WIFI_RETRY);
+                    sendWifiStatusUpdate(false, "wifi_connection_timeout");
+                    awaitingWifiProvisioning = false;
+                    suppressAutoReconnect = true;
+                    wifiRetryCount = 0;
+                    WiFi.disconnect(true);
+                    WiFi.setAutoReconnect(false);
+                } else {
+                    Serial.printf("WiFi 연결 타임아웃, 재시도 %d/%d\n", wifiRetryCount, MAX_WIFI_RETRY);
+                    WiFi.disconnect(false);
+                    delay(1000);
+                    WiFi.begin(ssid.c_str(), password.c_str());
+                    provisioningStartMs = millis(); // 타이머 리셋
+                }
+            }
+        }
+    }
+}
+
+void reconnectWiFi() {
+    // 저장된 전역 ssid/password를 사용하여 즉시 재연결
+    Serial.println("WiFi 재연결 시도: 저장된 자격 증명 사용");
+    WiFi.disconnect(true);
+    delay(200);
+    WiFi.mode(WIFI_STA);
+    WiFi.persistent(true);
+    WiFi.setAutoReconnect(true);
+    delay(100);
+    if (areWiFiCredentialsAvailable()) {
+        Serial.print("WiFi에 연결 시도: ");
+        Serial.println(ssid);
+        WiFi.begin(ssid.c_str(), password.c_str());
+        awaitingWifiProvisioning = true;
+        suppressAutoReconnect = false;
+        provisioningStartMs = millis();
+        wifiRetryCount = 0; // 새로운 연결 시도 시 재시도 카운터 리셋
+    } else {
+        Serial.println("저장된 WiFi 자격 증명 없음, 재연결 불가");
+        awaitingWifiProvisioning = false;
+        suppressAutoReconnect = false;
     }
 }
 
@@ -149,15 +255,15 @@ String scanWifiNetworks(const String& macId) {
     int maxNetworks = min(numNetworks, 10);
     
     // ArduinoJson을 사용하여 JSON 응답 생성
-    StaticJsonDocument<1024> doc; // 크기 증가 (보안 정보 추가로 인해)
+    JsonDocument doc;
     doc["macid"] = macId;
     doc["numAp"] = maxNetworks;
-    JsonArray apList = doc.createNestedArray("aplist");
+    JsonArray apList = doc["aplist"].to<JsonArray>();
 
     Serial.printf("--- 정렬된 WiFi 네트워크 (상위 %d개) ---\n", maxNetworks);
     for (int i = 0; i < maxNetworks; ++i) {
         // 각 네트워크를 객체로 생성하여 추가
-        JsonObject network = apList.createNestedObject();
+        JsonObject network = apList.add<JsonObject>();
         network["ssid"] = networks[i].ssid;
         network["rssi"] = networks[i].rssi;
         network["locked"] = networks[i].securityStatus == "LOCKED";

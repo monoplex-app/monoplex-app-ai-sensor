@@ -44,4 +44,10 @@ String getMacAddress();
  */
 String scanWifiNetworks(const String& macId);
 
+/**
+ * @brief 저장된 자격 증명으로 즉시 Wi‑Fi 재연결을 시도합니다.
+ * 기존 연결을 끊고 재시도합니다.
+ */
+void reconnectWiFi();
+
 #endif // WIFI_HANDLER_H
