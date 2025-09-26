@@ -65,16 +65,16 @@ bool initCamera() {
         Serial.println("PSRAM 감지됨 - 카메라 촬영 실패 방지 모드로 설정");
         
         // ========= 카메라 촬영 실패 방지 설정 =========
-        config.frame_size = FRAMESIZE_UXGA;
-        config.jpeg_quality = 20;            // JPEG 품질을 더 낮춤 (처리 부하 감소)
-        config.fb_count = 1;                 // 단일 버퍼로 변경 (이전 이미지 문제 방지)
-        config.grab_mode = CAMERA_GRAB_WHEN_EMPTY; // 더 안전한 그랩 모드
+        config.frame_size = FRAMESIZE_UXGA;          // 1600x1200, PSRAM 환경에서 고품질
+        config.jpeg_quality = 10;   // 32(보라색 필터 효과)
+        config.fb_count = 2;
+        config.grab_mode = CAMERA_GRAB_LATEST; // CAMERA_GRAB_WHEN_EMPTY
         config.fb_location = CAMERA_FB_IN_PSRAM;
         // ============================================
     } else {
         Serial.println("PSRAM 없음 - 낮은 품질 설정 사용");
-        config.frame_size = FRAMESIZE_SVGA;  // 800x600
-        config.jpeg_quality = 32;  // 낮은 품질
+        config.frame_size = FRAMESIZE_SVGA;           // 800x600
+        config.jpeg_quality = 24;                     // 메모리 제약 내에서 품질 상향
         config.fb_count = 1;
         config.fb_location = CAMERA_FB_IN_DRAM;
     }
@@ -143,14 +143,20 @@ bool initCamera() {
     // 센서 추가 설정
     sensor_t * s = esp_camera_sensor_get();
     if (s) {
+        // 방향/기본 색감
         s->set_vflip(s, 1);
-        s->set_brightness(s, 1);
+        s->set_brightness(s, 0);
         s->set_saturation(s, 0);
-        // 카메라 촬영 실패 방지를 위한 추가 설정
-        s->set_gainceiling(s, GAINCEILING_2X);  // 게인 제한으로 노이즈 감소
-        s->set_agc_gain(s, 0);                  // 자동 게인 제어 비활성화
-        s->set_aec_value(s, 300);               // 노출 값 고정
-        Serial.println("센서 설정 완료 (촬영 실패 방지 모드)");
+
+        // 화질 개선: 자동 화이트밸런스/노출/게인 활성화 및 렌즈 보정
+        s->set_whitebal(s, 1);
+        s->set_awb_gain(s, 1);
+        s->set_exposure_ctrl(s, 1);
+        s->set_gain_ctrl(s, 1);
+        s->set_gainceiling(s, GAINCEILING_8X);
+        s->set_lenc(s, 1);
+
+        Serial.println("센서 설정 완료 (화질 향상 모드)");
     } else {
         Serial.println("센서 설정 실패");
     }
